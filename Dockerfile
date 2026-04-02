@@ -11,8 +11,4 @@ COPY . .
 
 EXPOSE 8000
 
-ENV HOST=0.0.0.0
-ENV PORT=8000
-ENV WORKERS=2
-
-CMD uvicorn server.app:app --host \System.Management.Automation.Internal.Host.InternalHost --port \ --workers \
+CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
