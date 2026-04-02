@@ -94,54 +94,87 @@ Emergency contact: Linda Okafor (spouse)""",
     },
 
     "task_3_hard": {
-        "task_name": "Data Breach Incident Report — Full Compliance Audit",
+        "task_name": "System Audit Log — Advanced PII Extraction",
         "difficulty": "hard",
         "description": (
-            "You are a PII compliance auditor. Analyze the data breach incident report below "
-            "and identify ALL personally identifiable information (PII). "
+            "You are a PII compliance auditor performing a forensic audit on a leaked system log file. "
+            "Identify ALL personally identifiable information (PII) present. "
             "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, SSN, ADDRESS, DOB, PASSWORD. "
-            "Warning: some values are embedded in prose, formatted unconventionally, or appear multiple times. "
-            "Both the text AND the pii_type must be exactly correct for full credit. "
-            "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys."
+            "WARNING: The document contains red herrings — values that resemble PII but are not "
+            "(e.g. error codes, IP addresses, version numbers, case IDs). Do NOT flag these. "
+            "PII may appear inside code snippets, log lines, database dumps, or config files. "
+            "Some formats are unconventional: dots instead of dashes, spaces instead of dashes, "
+            "international phone formats, addresses embedded in strings. "
+            "Extract the EXACT text as it appears. Both text AND pii_type must be correct for full credit. "
+            "Submit as a JSON list of objects with 'text' and 'pii_type' keys."
         ),
         "pii_types_in_scope": [
             "NAME", "EMAIL", "PHONE", "CREDIT_CARD", "SSN",
             "ADDRESS", "DOB", "PASSWORD"
         ],
-        "document": """INCIDENT REPORT — DATA BREACH NOTIFICATION
-Reference: INC-2024-00847 | Classification: RESTRICTED
+        "document": """SYSTEM AUDIT EXPORT — CLASSIFICATION: RESTRICTED
+Export ID: SYS-2024-09-AUDIT | Generated: 2024-09-18T03:22:11Z
+Reviewed by: Compliance Team | Case #291-44-8830
 
-On 14 March 2024, a breach was detected affecting customer records.
-The following data was confirmed exposed in plaintext logs:
+--- SECTION 1: APPLICATION CONFIG SNAPSHOT ---
 
-Customer: Dr. Amelia Voss
-Address on file: 12 Birchwood Lane, Apt 3B, Chicago, IL 60614
-Date of birth recorded as March 3rd, 1979.
-The primary card ending in 4539-1488-0343-6467 was compromised.
-Government ID cross-reference: SSN 309-52-7781 confirmed match.
-Contact: amelia.voss.92@gmail.com | Mobile: 001 (312) 409-7762
+# app_config.yaml (committed to internal repo by mistake)
+database:
+  host: 192.168.1.47
+  port: 5432
+  user: svc_account
+  password: "p@ssw0rd#Webb2024"
 
-System logs also captured the following credential in cleartext:
-   user_password = "Sunrise@2024!"
+billing:
+  processor: stripe_v3
+  fallback_card: "4916 3301 0198 2104"
+  backup_card: "5412 7534 9823 0011"
 
-A secondary contact, one Marcus Webb (dob: 11/22/1965), was notified.
-His backup email: m.webb.contact@protonmail.com
-Billing address differs: 889 Sunset Blvd, Los Angeles, CA 90028
-Card on file: 4916-3301-0198-2104 (exp 09/26)""",
+notifications:
+  # Primary contact for billing alerts — M.T. Webb
+  email: m.webb.92@protonmail.com
+  phone: +1.206.887.4401
+
+--- SECTION 2: DATABASE ROW DUMP (users table) ---
+
+| id  | full_name     | dob        | ssn         | address                                          |
+|-----|---------------|------------|-------------|--------------------------------------------------|
+| 104 | Marcus T. Webb| 08/15/1996 | 291.44.8830 | 740 Evergreen Terrace, Springfield, OR 97477     |
+| 105 | Priya Nair    | 1990-03-22 | 408.55.1923 | Flat 9, Tower B, Prestige Elysian, Bangalore 560068 |
+
+NOTE: SSN format uses dots — confirm with HR. Error code 4916-3301 flagged during export.
+Version 2.104 of the schema was active at time of breach.
+
+--- SECTION 3: ACCESS LOGS (raw) ---
+
+2024-09-17 22:14:03 | AUTH_FAIL | user=priya.nair | ip=10.0.0.22 | attempt=3
+2024-09-17 22:14:09 | AUTH_OK   | user=priya.nair | email=p.nair@encrypted.io | session=a8f3c
+2024-09-17 22:15:44 | PROFILE_VIEW | accessed_by=priya.nair | target_user=Marcus T. Webb
+2024-09-17 22:16:01 | EXPORT_REQ  | fields=[name,dob,ssn,address,card] | requester=p.nair@encrypted.io
+
+--- SECTION 4: SUPPORT TICKET #98-4501 ---
+
+Customer called from 0091-98-4501-3376 (India) requesting card dispute.
+Agent notes: caller verified identity, DOB confirmed as 08/15/1996.
+Card disputed: last four digits 2104. Full number retrieved from vault: 4916 3301 0198 2104.
+Billing address on file: 740 Evergreen Terrace, Springfield, OR 97477.
+Escalated to senior agent. ID: 98-4501 logged for tracking.""",
         "ground_truth": [
-            {"text": "Dr. Amelia Voss", "pii_type": "NAME"},
-            {"text": "12 Birchwood Lane, Apt 3B, Chicago, IL 60614", "pii_type": "ADDRESS"},
-            {"text": "March 3rd, 1979", "pii_type": "DOB"},
-            {"text": "4539-1488-0343-6467", "pii_type": "CREDIT_CARD"},
-            {"text": "309-52-7781", "pii_type": "SSN"},
-            {"text": "amelia.voss.92@gmail.com", "pii_type": "EMAIL"},
-            {"text": "001 (312) 409-7762", "pii_type": "PHONE"},
-            {"text": "Sunrise@2024!", "pii_type": "PASSWORD"},
-            {"text": "Marcus Webb", "pii_type": "NAME"},
-            {"text": "11/22/1965", "pii_type": "DOB"},
-            {"text": "m.webb.contact@protonmail.com", "pii_type": "EMAIL"},
-            {"text": "889 Sunset Blvd, Los Angeles, CA 90028", "pii_type": "ADDRESS"},
-            {"text": "4916-3301-0198-2104", "pii_type": "CREDIT_CARD"},
+            {"text": "p@ssw0rd#Webb2024", "pii_type": "PASSWORD"},
+            {"text": "4916 3301 0198 2104", "pii_type": "CREDIT_CARD"},
+            {"text": "5412 7534 9823 0011", "pii_type": "CREDIT_CARD"},
+            {"text": "m.webb.92@protonmail.com", "pii_type": "EMAIL"},
+            {"text": "+1.206.887.4401", "pii_type": "PHONE"},
+            {"text": "Marcus T. Webb", "pii_type": "NAME"},
+            {"text": "08/15/1996", "pii_type": "DOB"},
+            {"text": "291.44.8830", "pii_type": "SSN"},
+            {"text": "740 Evergreen Terrace, Springfield, OR 97477", "pii_type": "ADDRESS"},
+            {"text": "Priya Nair", "pii_type": "NAME"},
+            {"text": "1990-03-22", "pii_type": "DOB"},
+            {"text": "408.55.1923", "pii_type": "SSN"},
+            {"text": "Flat 9, Tower B, Prestige Elysian, Bangalore 560068", "pii_type": "ADDRESS"},
+            {"text": "p.nair@encrypted.io", "pii_type": "EMAIL"},
+            {"text": "0091-98-4501-3376", "pii_type": "PHONE"},
         ],
         "grader": "hard",
     },
