@@ -200,7 +200,7 @@ def main():
 
     all_results = []
 
-    with PIIEnv(base_url=ENV_URL) as env:
+    with PIIEnv(base_url=ENV_URL).sync() as env:
         env.reset()
 
         for task_id in TASK_IDS:
