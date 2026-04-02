@@ -94,78 +94,116 @@ Emergency contact: Linda Okafor (spouse)""",
     },
 
     "task_3_hard": {
-        "task_name": "System Audit Log — Advanced PII Extraction",
+        "task_name": "Technical Artifact Forensic Audit",
         "difficulty": "hard",
         "description": (
-            "You are a PII compliance auditor performing a forensic audit on a leaked system log file. "
-            "Identify ALL personally identifiable information (PII) present. "
+            "You are a PII compliance auditor performing a forensic review of a leaked technical artifact "
+            "containing git diffs, SQL statements, API logs, and support chat transcripts. "
+            "Identify ALL personally identifiable information (PII). "
             "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, SSN, ADDRESS, DOB, PASSWORD. "
-            "WARNING: The document contains red herrings — values that resemble PII but are not "
-            "(e.g. error codes, IP addresses, version numbers, case IDs). Do NOT flag these. "
-            "PII may appear inside code snippets, log lines, database dumps, or config files. "
-            "Some formats are unconventional: dots instead of dashes, spaces instead of dashes, "
-            "international phone formats, addresses embedded in strings. "
-            "Extract the EXACT text as it appears. Both text AND pii_type must be correct for full credit. "
+            "CRITICAL WARNINGS: "
+            "(1) The document contains convincing red herrings — partial card numbers, usernames without domains, "
+            "version strings, order IDs, product codes, and bcrypt hashes. Do NOT flag these as PII. "
+            "(2) PII appears inside code strings, SQL values, JSON fields, and natural conversation — "
+            "there are NO labeled fields like 'email:' or 'phone:' to guide you. "
+            "(3) Some formats are non-standard: AMEX cards have 15 digits, "
+            "international phones have country codes, addresses may be non-Western. "
+            "Extract EXACT text as it appears. Both text AND pii_type must be correct for full credit. "
             "Submit as a JSON list of objects with 'text' and 'pii_type' keys."
         ),
         "pii_types_in_scope": [
             "NAME", "EMAIL", "PHONE", "CREDIT_CARD", "SSN",
             "ADDRESS", "DOB", "PASSWORD"
         ],
-        "document": """INTERNAL SECURITY INCIDENT REPORT
-Reference: SEC-2024-1092 | Classification: RESTRICTED | Case #774-AUDIT
+        "document": """FORENSIC EXPORT — INTERNAL USE ONLY
+Ticket: SEC-2024-1847 | Analyst: redacted | Date: 2024-10-02
 
-On 17 September 2024, an unauthorized data export was detected. Two customer
-records were confirmed exposed. This report documents the breach findings.
+=== SECTION A: GIT DIFF (accidental credential commit) ===
 
-AFFECTED INDIVIDUAL 1:
-The primary account holder is Marcus T. Webb, a customer since 2019.
-His registered email is m.webb.92@protonmail.com and he can be reached
-at +1.206.887.4401. His date of birth on file is 08/15/1996.
-The billing address associated with this account is:
-740 Evergreen Terrace, Springfield, OR 97477.
+diff --git a/config/prod.yaml b/config/prod.yaml
+--- a/config/prod.yaml
++++ b/config/prod.yaml
+@@ -12,7 +12,7 @@
+ payment:
+   processor: stripe
+-  api_key: "sk_live_placeholder"
++  primary_card: "3782 822463 10005"
++  # fallback — Discover: 6011 1111 1111 1117
++  card_holder: "Kenji Watanabe"
++  notify: k.watanabe@devmail.jp
 
-During the breach, the following payment card was exposed:
-  Card Number: 4916 3301 0198 2104 (Visa, exp 11/27)
-  Backup Card: 5412 7534 9823 0011 (Mastercard)
-Government ID on record: SSN 291.44.8830 (dot-format, legacy system).
+ auth:
+-  admin_pass: "changeme"
++  admin_pass: "W@tana8e#Secure!"
++  # DO NOT COMMIT — remove before PR
++  # bcrypt ref: $2b$12$W@tana8eHash... (not the real password)
 
-A misconfigured deployment script also leaked the following credential:
-  config.auth.password = "p@ssw0rd#Webb2024"
+diff --git a/tests/fixtures/user_seed.sql b/tests/fixtures/user_seed.sql
+--- a/tests/fixtures/user_seed.sql
++++ b/tests/fixtures/user_seed.sql
+@@ -0,0 +1,6 @@
++-- Seed data accidentally included real records (revert immediately)
++INSERT INTO users (name, dob, ssn, address) VALUES (
++  'Kenji Watanabe',
++  '1995-02-23',
++  '523-45-7890',
++  '2-14-5 Shibuya, Tokyo 150-0002, Japan'
++);
++-- Product code for reference: 523-45 (unrelated to above)
++-- Order ID: 6011-1117 (do not confuse with payment methods)
 
-AFFECTED INDIVIDUAL 2:
-The secondary account was accessed by Priya Nair using stolen credentials.
-Her account email is p.nair@encrypted.io. Date of birth: 1990-03-22.
-Residential address: Flat 9, Tower B, Prestige Elysian, Bangalore 560068.
-SSN equivalent (foreign national ID): 408.55.1923.
-Contact number on file: 0091-98-4501-3376 (India).
+=== SECTION B: API RESPONSE LOG (production traffic sample) ===
 
-NOTE FOR AUDITORS:
-- Error code 4916-3301 was logged separately and is NOT a card number.
-- Case reference #774-AUDIT is an internal ID, not a government identifier.
-- IP address 10.0.0.22 is a system address, not PII.
-- Version 2.104 refers to schema version, not PII.""",
+2024-10-01 18:42:03 POST /api/v2/checkout 200
+Request-ID: 3782-8224-ABCD
+Payload (truncated):
+{
+  "customer": {
+    "full_name": "Fatima Al-Rashidi",
+    "contact": "fatima.ar.1988@outlook.com",
+    "mobile": "971-4-123-9876",
+    "billing_address": "PO Box 4422, Dubai Marina, Dubai, UAE",
+    "card": "6011 1111 1111 1117",
+    "dob": "1988-11-03"
+  },
+  "session": "a8f3c9d",
+  "version": "1988-11",
+  "ip": "192.168.0.14"
+}
+
+=== SECTION C: SUPPORT CHAT TRANSCRIPT ===
+
+[10:14] Agent_07: Hi, can I get your name please?
+[10:14] Customer: yeah its fatima, Fatima Al-Rashidi
+[10:15] Agent_07: Thanks Fatima. Phone number on the account?
+[10:15] Customer: its nine-seven-one, four, one-two-three, nine-eight-seven-six
+[10:16] Agent_07: Got it. And the reset token for your account was sent — did you set
+         the new password to what you told our bot earlier?
+[10:16] Customer: yes its #fa_r@sh!d1_2024 i set it this morning
+[10:17] Agent_07: Perfect. Your card ending 1117 has been flagged. Full number
+         on file is 6011 1111 1111 1117. Shipping to PO Box 4422, Dubai Marina, Dubai, UAE?
+[10:17] Customer: yes thats right. also can you update my phone to +81-90-3344-5567
+[10:18] Agent_07: Done. Anything else?""",
         "ground_truth": [
-            {"text": "Marcus T. Webb", "pii_type": "NAME"},
-            {"text": "m.webb.92@protonmail.com", "pii_type": "EMAIL"},
-            {"text": "+1.206.887.4401", "pii_type": "PHONE"},
-            {"text": "08/15/1996", "pii_type": "DOB"},
-            {"text": "740 Evergreen Terrace, Springfield, OR 97477", "pii_type": "ADDRESS"},
-            {"text": "4916 3301 0198 2104", "pii_type": "CREDIT_CARD"},
-            {"text": "5412 7534 9823 0011", "pii_type": "CREDIT_CARD"},
-            {"text": "291.44.8830", "pii_type": "SSN"},
-            {"text": "p@ssw0rd#Webb2024", "pii_type": "PASSWORD"},
-            {"text": "Priya Nair", "pii_type": "NAME"},
-            {"text": "p.nair@encrypted.io", "pii_type": "EMAIL"},
-            {"text": "1990-03-22", "pii_type": "DOB"},
-            {"text": "Flat 9, Tower B, Prestige Elysian, Bangalore 560068", "pii_type": "ADDRESS"},
-            {"text": "408.55.1923", "pii_type": "SSN"},
-            {"text": "0091-98-4501-3376", "pii_type": "PHONE"},
+            {"text": "3782 822463 10005", "pii_type": "CREDIT_CARD"},
+            {"text": "6011 1111 1111 1117", "pii_type": "CREDIT_CARD"},
+            {"text": "Kenji Watanabe", "pii_type": "NAME"},
+            {"text": "k.watanabe@devmail.jp", "pii_type": "EMAIL"},
+            {"text": "W@tana8e#Secure!", "pii_type": "PASSWORD"},
+            {"text": "1995-02-23", "pii_type": "DOB"},
+            {"text": "523-45-7890", "pii_type": "SSN"},
+            {"text": "2-14-5 Shibuya, Tokyo 150-0002, Japan", "pii_type": "ADDRESS"},
+            {"text": "Fatima Al-Rashidi", "pii_type": "NAME"},
+            {"text": "fatima.ar.1988@outlook.com", "pii_type": "EMAIL"},
+            {"text": "971-4-123-9876", "pii_type": "PHONE"},
+            {"text": "PO Box 4422, Dubai Marina, Dubai, UAE", "pii_type": "ADDRESS"},
+            {"text": "1988-11-03", "pii_type": "DOB"},
+            {"text": "#fa_r@sh!d1_2024", "pii_type": "PASSWORD"},
+            {"text": "+81-90-3344-5567", "pii_type": "PHONE"},
         ],
         "grader": "hard",
     },
 }
-
 # ── Grading Logic ──────────────────────────────────────────────────────────
 
 # Common LLM aliases for PII types — maps to our canonical names
