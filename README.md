@@ -190,6 +190,7 @@ with PIIEnv(base_url="http://localhost:7860").sync() as env:
 ## Project Structure
 
 ```
+```
 pii-compliance-auditor/
 ├── server/
 │   ├── pii_environment.py   # Core environment + graders + task registry
@@ -199,5 +200,7 @@ pii-compliance-auditor/
 ├── openenv.yaml             # OpenEnv spec manifest
 ├── Dockerfile               # Container definition
 ├── requirements.txt         # Dependencies
+├── pyproject.toml           # Project metadata
+├── uv.lock                  # Locked dependencies for reproducibility
 └── README.md
 ```
