@@ -37,17 +37,22 @@ TASKS = {
             "You are a PII compliance auditor. Analyze the customer support email below "
             "and identify ALL personally identifiable information (PII). "
             "Look for: NAME, EMAIL, PHONE. "
+            "Note: not every number or name-like word is PII — use judgment. "
             "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys. "
             "Example: [{\"text\": \"John Smith\", \"pii_type\": \"NAME\"}]"
         ),
         "pii_types_in_scope": ["NAME", "EMAIL", "PHONE"],
-        "document": """Subject: Account Access Issue
+        "document": """Subject: Account Access Issue — Ticket #4159-2847
 
 Hi Support Team,
 
 My name is Sarah Mitchell and I've been unable to log into my account
-since yesterday. Please reach me at sarah.mitchell@outlook.com or call
-me on +1-415-992-3847 at any time.
+since yesterday. The issue started after I updated my billing details on
+the 3rd. Please reach me at sarah.mitchell@outlook.com or call me on
++1-415-992-3847 at any time — my alternate is also reachable but
+sarah.mitchell@outlook.com is preferred.
+
+Could you also check with your colleague James if ticket 4159 is linked?
 
 Looking forward to your help.
 Best,
@@ -67,12 +72,14 @@ Sarah""",
             "You are a PII compliance auditor. Analyze the employee onboarding form below "
             "and identify ALL personally identifiable information (PII). "
             "Look for: NAME, ADDRESS, DOB, SSN, PHONE, EMAIL. "
-            "Note: some PII may be embedded in sentences rather than labeled fields. "
+            "Note: some PII is embedded in sentences rather than labeled fields. "
+            "Not all numbers are PII — department codes and employee IDs are not. "
             "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys. "
             "Example: [{\"text\": \"John Smith\", \"pii_type\": \"NAME\"}]"
         ),
         "pii_types_in_scope": ["NAME", "ADDRESS", "DOB", "SSN", "PHONE", "EMAIL"],
         "document": """EMPLOYEE ONBOARDING FORM — CONFIDENTIAL
+Department Code: 472-80 | Employee ID: TXN-9901
 
 Full Name: James Okafor
 The employee was born on the 4th of July, 1988, in Lagos, Nigeria.
@@ -81,7 +88,10 @@ For payroll, the SSN on file reads 472-80-1937.
 James can be reached at +1-737-204-9901.
 Work email has been provisioned: j.okafor@techcorp.io
 
-Emergency contact: Linda Okafor (spouse)""",
+IT notes: laptop shipped to the residential address above.
+The account was activated by HR rep Linda — see internal ID TXN-9901.
+
+Emergency contact: Linda Okafor, reachable at l.okafor.hr@techcorp.io""",
         "ground_truth": [
             {"text": "James Okafor", "pii_type": "NAME"},
             {"text": "4th of July, 1988", "pii_type": "DOB"},
@@ -89,6 +99,8 @@ Emergency contact: Linda Okafor (spouse)""",
             {"text": "472-80-1937", "pii_type": "SSN"},
             {"text": "+1-737-204-9901", "pii_type": "PHONE"},
             {"text": "j.okafor@techcorp.io", "pii_type": "EMAIL"},
+            {"text": "Linda Okafor", "pii_type": "NAME"},
+            {"text": "l.okafor.hr@techcorp.io", "pii_type": "EMAIL"},
         ],
         "grader": "medium",
     },
@@ -354,7 +366,7 @@ def _grade_hard(predicted: list, ground_truth: list) -> dict:
     recall = correct / total if total else 0.0
     f1 = (2 * precision * recall / (precision + recall)
           if (precision + recall) > 0 else 0.0)
-    penalty = fp * 0.15
+    penalty = fp * 0.08
     score = max(0.0, min(1.0, f1 - penalty))
     return {
         "score": round(score, 4),
