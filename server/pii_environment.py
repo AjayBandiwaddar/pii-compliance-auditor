@@ -186,6 +186,16 @@ def _normalize(text: str) -> str:
     return text.lower().strip()
 
 
+def _normalize_numeric(text: str) -> str:
+    """For numeric PII (CC, SSN, PHONE), strip separators before comparing.
+    This ensures format variations (spaces/dots/dashes) don't cause false mismatches."""
+    import re
+    return re.sub(r"[\s\-\.]", "", text.lower().strip())
+
+
+NUMERIC_PII_TYPES = {"CREDIT_CARD", "SSN", "PHONE"}
+
+
 def _grade_easy(predicted: list, ground_truth: list) -> dict:
     """Recall-based. Full credit per correct text+type match. No FP penalty."""
     correct = 0
@@ -263,17 +273,26 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
 
 
 def _grade_hard(predicted: list, ground_truth: list) -> dict:
-    """Strict F1. Both text AND type must match exactly. FP penalty = 0.15."""
+    """Strict F1. Both text AND type must match exactly. FP penalty = 0.15.
+    For numeric PII types (CREDIT_CARD, SSN, PHONE), separators are normalized
+    so format variations (spaces/dots/dashes) do not penalize correct detections."""
     correct = 0
     matched = set()
     for pred in predicted:
+        pred_type = pred.get("pii_type", "").upper()
+        pred_text = pred.get("text", "")
         for i, gt in enumerate(ground_truth):
             if i not in matched:
-                if (_normalize(pred.get("text", "")) == _normalize(gt["text"])
-                        and pred.get("pii_type", "").upper() == gt["pii_type"]):
-                    correct += 1
-                    matched.add(i)
-                    break
+                gt_type = gt["pii_type"]
+                if pred_type == gt_type:
+                    if gt_type in NUMERIC_PII_TYPES:
+                        text_match = _normalize_numeric(pred_text) == _normalize_numeric(gt["text"])
+                    else:
+                        text_match = _normalize(pred_text) == _normalize(gt["text"])
+                    if text_match:
+                        correct += 1
+                        matched.add(i)
+                        break
     total = len(ground_truth)
     fp = max(len(predicted) - correct, 0)
     precision = correct / len(predicted) if predicted else 0.0
