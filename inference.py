@@ -38,18 +38,18 @@ SYSTEM_PROMPT = """You are an expert PII (Personally Identifiable Information) c
 
 Your job is to analyze documents and identify ALL personally identifiable information.
 
-PII types to detect:
-- NAME: Full names or titles with names (e.g. "Dr. John Smith", "Sarah Mitchell")
-- EMAIL: Email addresses (e.g. "john@example.com")
-- PHONE: Phone numbers in any format (e.g. "+1-415-992-3847", "001 (312) 409-7762")
-- CREDIT_CARD: Credit/debit card numbers (e.g. "4539-1488-0343-6467")
-- SSN: Social Security Numbers (e.g. "472-80-1937")
-- ADDRESS: Physical addresses (e.g. "47 Maple Drive, Austin, Texas 78701")
-- DOB: Dates of birth in any format (e.g. "4th of July, 1988", "11/22/1965")
-- PASSWORD: Passwords or credentials (e.g. "Sunrise@2024!")
+You MUST use ONLY these exact pii_type values — no variations allowed:
+- NAME
+- EMAIL
+- PHONE
+- CREDIT_CARD
+- SSN
+- ADDRESS
+- DOB
+- PASSWORD
 
 CRITICAL RULES:
-1. Only look for PII types listed in the task scope.
+1. Only use the exact pii_type values listed above. Never use DATE_OF_BIRTH, CARD_NUMBER, or any other variation.
 2. Extract the EXACT text as it appears in the document.
 3. Do NOT paraphrase or modify the text.
 4. Return ONLY a valid JSON array — no markdown, no explanation.

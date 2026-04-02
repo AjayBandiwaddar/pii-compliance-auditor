@@ -112,68 +112,54 @@ Emergency contact: Linda Okafor (spouse)""",
             "NAME", "EMAIL", "PHONE", "CREDIT_CARD", "SSN",
             "ADDRESS", "DOB", "PASSWORD"
         ],
-        "document": """SYSTEM AUDIT EXPORT — CLASSIFICATION: RESTRICTED
-Export ID: SYS-2024-09-AUDIT | Generated: 2024-09-18T03:22:11Z
-Reviewed by: Compliance Team | Case #291-44-8830
+        "document": """INTERNAL SECURITY INCIDENT REPORT
+Reference: SEC-2024-1092 | Classification: RESTRICTED | Case #774-AUDIT
 
---- SECTION 1: APPLICATION CONFIG SNAPSHOT ---
+On 17 September 2024, an unauthorized data export was detected. Two customer
+records were confirmed exposed. This report documents the breach findings.
 
-# app_config.yaml (committed to internal repo by mistake)
-database:
-  host: 192.168.1.47
-  port: 5432
-  user: svc_account
-  password: "p@ssw0rd#Webb2024"
+AFFECTED INDIVIDUAL 1:
+The primary account holder is Marcus T. Webb, a customer since 2019.
+His registered email is m.webb.92@protonmail.com and he can be reached
+at +1.206.887.4401. His date of birth on file is 08/15/1996.
+The billing address associated with this account is:
+740 Evergreen Terrace, Springfield, OR 97477.
 
-billing:
-  processor: stripe_v3
-  fallback_card: "4916 3301 0198 2104"
-  backup_card: "5412 7534 9823 0011"
+During the breach, the following payment card was exposed:
+  Card Number: 4916 3301 0198 2104 (Visa, exp 11/27)
+  Backup Card: 5412 7534 9823 0011 (Mastercard)
+Government ID on record: SSN 291.44.8830 (dot-format, legacy system).
 
-notifications:
-  # Primary contact for billing alerts — M.T. Webb
-  email: m.webb.92@protonmail.com
-  phone: +1.206.887.4401
+A misconfigured deployment script also leaked the following credential:
+  config.auth.password = "p@ssw0rd#Webb2024"
 
---- SECTION 2: DATABASE ROW DUMP (users table) ---
+AFFECTED INDIVIDUAL 2:
+The secondary account was accessed by Priya Nair using stolen credentials.
+Her account email is p.nair@encrypted.io. Date of birth: 1990-03-22.
+Residential address: Flat 9, Tower B, Prestige Elysian, Bangalore 560068.
+SSN equivalent (foreign national ID): 408.55.1923.
+Contact number on file: 0091-98-4501-3376 (India).
 
-| id  | full_name     | dob        | ssn         | address                                          |
-|-----|---------------|------------|-------------|--------------------------------------------------|
-| 104 | Marcus T. Webb| 08/15/1996 | 291.44.8830 | 740 Evergreen Terrace, Springfield, OR 97477     |
-| 105 | Priya Nair    | 1990-03-22 | 408.55.1923 | Flat 9, Tower B, Prestige Elysian, Bangalore 560068 |
-
-NOTE: SSN format uses dots — confirm with HR. Error code 4916-3301 flagged during export.
-Version 2.104 of the schema was active at time of breach.
-
---- SECTION 3: ACCESS LOGS (raw) ---
-
-2024-09-17 22:14:03 | AUTH_FAIL | user=priya.nair | ip=10.0.0.22 | attempt=3
-2024-09-17 22:14:09 | AUTH_OK   | user=priya.nair | email=p.nair@encrypted.io | session=a8f3c
-2024-09-17 22:15:44 | PROFILE_VIEW | accessed_by=priya.nair | target_user=Marcus T. Webb
-2024-09-17 22:16:01 | EXPORT_REQ  | fields=[name,dob,ssn,address,card] | requester=p.nair@encrypted.io
-
---- SECTION 4: SUPPORT TICKET #98-4501 ---
-
-Customer called from 0091-98-4501-3376 (India) requesting card dispute.
-Agent notes: caller verified identity, DOB confirmed as 08/15/1996.
-Card disputed: last four digits 2104. Full number retrieved from vault: 4916 3301 0198 2104.
-Billing address on file: 740 Evergreen Terrace, Springfield, OR 97477.
-Escalated to senior agent. ID: 98-4501 logged for tracking.""",
+NOTE FOR AUDITORS:
+- Error code 4916-3301 was logged separately and is NOT a card number.
+- Case reference #774-AUDIT is an internal ID, not a government identifier.
+- IP address 10.0.0.22 is a system address, not PII.
+- Version 2.104 refers to schema version, not PII.""",
         "ground_truth": [
-            {"text": "p@ssw0rd#Webb2024", "pii_type": "PASSWORD"},
-            {"text": "4916 3301 0198 2104", "pii_type": "CREDIT_CARD"},
-            {"text": "5412 7534 9823 0011", "pii_type": "CREDIT_CARD"},
+            {"text": "Marcus T. Webb", "pii_type": "NAME"},
             {"text": "m.webb.92@protonmail.com", "pii_type": "EMAIL"},
             {"text": "+1.206.887.4401", "pii_type": "PHONE"},
-            {"text": "Marcus T. Webb", "pii_type": "NAME"},
             {"text": "08/15/1996", "pii_type": "DOB"},
-            {"text": "291.44.8830", "pii_type": "SSN"},
             {"text": "740 Evergreen Terrace, Springfield, OR 97477", "pii_type": "ADDRESS"},
+            {"text": "4916 3301 0198 2104", "pii_type": "CREDIT_CARD"},
+            {"text": "5412 7534 9823 0011", "pii_type": "CREDIT_CARD"},
+            {"text": "291.44.8830", "pii_type": "SSN"},
+            {"text": "p@ssw0rd#Webb2024", "pii_type": "PASSWORD"},
             {"text": "Priya Nair", "pii_type": "NAME"},
-            {"text": "1990-03-22", "pii_type": "DOB"},
-            {"text": "408.55.1923", "pii_type": "SSN"},
-            {"text": "Flat 9, Tower B, Prestige Elysian, Bangalore 560068", "pii_type": "ADDRESS"},
             {"text": "p.nair@encrypted.io", "pii_type": "EMAIL"},
+            {"text": "1990-03-22", "pii_type": "DOB"},
+            {"text": "Flat 9, Tower B, Prestige Elysian, Bangalore 560068", "pii_type": "ADDRESS"},
+            {"text": "408.55.1923", "pii_type": "SSN"},
             {"text": "0091-98-4501-3376", "pii_type": "PHONE"},
         ],
         "grader": "hard",
@@ -181,6 +167,37 @@ Escalated to senior agent. ID: 98-4501 logged for tracking.""",
 }
 
 # ── Grading Logic ──────────────────────────────────────────────────────────
+
+# Common LLM aliases for PII types — maps to our canonical names
+PII_TYPE_ALIASES = {
+    "DATE_OF_BIRTH": "DOB",
+    "BIRTH_DATE": "DOB",
+    "BIRTHDATE": "DOB",
+    "DATE": "DOB",
+    "CARD_NUMBER": "CREDIT_CARD",
+    "CREDIT_CARD_NUMBER": "CREDIT_CARD",
+    "CARD": "CREDIT_CARD",
+    "DEBIT_CARD": "CREDIT_CARD",
+    "PAYMENT_CARD": "CREDIT_CARD",
+    "SOCIAL_SECURITY_NUMBER": "SSN",
+    "SOCIAL_SECURITY": "SSN",
+    "PHONE_NUMBER": "PHONE",
+    "TELEPHONE": "PHONE",
+    "MOBILE": "PHONE",
+    "MOBILE_NUMBER": "PHONE",
+    "FULL_NAME": "NAME",
+    "PERSON_NAME": "NAME",
+    "STREET_ADDRESS": "ADDRESS",
+    "HOME_ADDRESS": "ADDRESS",
+    "PASS": "PASSWORD",
+    "CREDENTIAL": "PASSWORD",
+    "EMAIL_ADDRESS": "EMAIL",
+}
+
+def _normalize_pii_type(pii_type: str) -> str:
+    """Normalize LLM pii_type to our canonical names."""
+    canonical = pii_type.upper().strip()
+    return PII_TYPE_ALIASES.get(canonical, canonical)
 
 def _normalize(text: str) -> str:
     return text.lower().strip()
@@ -204,7 +221,7 @@ def _grade_easy(predicted: list, ground_truth: list) -> dict:
         for i, gt in enumerate(ground_truth):
             if i not in matched:
                 if (_normalize(pred.get("text", "")) == _normalize(gt["text"])
-                        and pred.get("pii_type", "").upper() == gt["pii_type"]):
+                        and _normalize_pii_type(pred.get("pii_type", "")) == gt["pii_type"]):
                     correct += 1
                     matched.add(i)
                     break
@@ -279,7 +296,7 @@ def _grade_hard(predicted: list, ground_truth: list) -> dict:
     correct = 0
     matched = set()
     for pred in predicted:
-        pred_type = pred.get("pii_type", "").upper()
+        pred_type = _normalize_pii_type(pred.get("pii_type", ""))
         pred_text = pred.get("text", "")
         for i, gt in enumerate(ground_truth):
             if i not in matched:
