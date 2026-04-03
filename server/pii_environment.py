@@ -1,17 +1,36 @@
 # Copyright (c) Ajay Bandiwaddar — OpenEnv Hackathon Round 1
 """
-PII Compliance Auditor — Environment Implementation.
+PII Compliance Auditor — Multi-Step Environment Implementation.
 
-Three tasks of increasing difficulty:
-  Task 1 (Easy)   — Support email, 5 items, recall grader    → ~0.80
-  Task 2 (Medium) — Onboarding form, 10 items, partial grader → ~0.60
-  Task 3 (Hard)   — Forensic audit, 15 items, strict F1       → ~0.30
+Three tasks of increasing difficulty.  Each episode is a genuine multi-step
+trajectory: the agent retrieves and annotates the document section-by-section,
+receiving an intermediate reward after each section, then finalises.
 
-Graders are fully deterministic.
+  Task 1 (Easy)   — 2 sections, recall grader      ->  ~0.80 final
+  Task 2 (Medium) — 2 sections, partial grader     ->  ~0.58 final
+  Task 3 (Hard)   — 4 sections, strict F1 grader   ->  ~0.25-0.35 final
+
+Episode trajectory
+------------------
+  Step 1        : get_task(task_id)
+  Step 2        : get_section(task_id, section_a)
+  Step 3        : annotate_section(...)   -> reward = section_a_score
+  ...repeat for every section...
+  Final step    : finalize_task(task_id) -> reward = final_score, done=true
+
+  Task 1 / 2 :  8 steps  (1 + 2x2 + 1)
+  Task 3     : 14 steps  (1 + 2x4 + 1 + 2 for llm calls in inference)
+
+Intermediate reward : simple recall over that section's ground truth
+Final reward        : full task grader (with FP penalty) over all annotations
+
+Backward compatibility
+-----------------------
+  submit_findings(task_id, findings_json) is kept for the automated validator.
 """
 
 import json
-from typing import Any, Optional
+from typing import Optional
 from uuid import uuid4
 
 try:
@@ -23,202 +42,306 @@ except ImportError:
 
 from fastmcp import FastMCP
 
-# ── Ground Truth Registry ──────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Task Registry
+# ---------------------------------------------------------------------------
 
 TASKS = {
+
+    # ── Task 1 — Easy ───────────────────────────────────────────────────────
     "task_1_easy": {
         "task_name": "Basic PII Detection",
         "difficulty": "easy",
         "description": (
-            "You are a PII compliance auditor. Analyze the customer support email below "
-            "and identify ALL personally identifiable information (PII). "
+            "You are a PII compliance auditor. Analyze the document section "
+            "provided and identify ALL personally identifiable information. "
             "Look for: NAME, EMAIL, PHONE. "
-            "Note: not every person mentioned is a data subject — "
-            "only flag PII belonging to the customer contacting support. "
+            "IMPORTANT: You are auditing CUSTOMER data only. "
+            "Do NOT flag PII belonging to company employees, agents, or support staff. "
             "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys. "
             "Example: [{\"text\": \"John Smith\", \"pii_type\": \"NAME\"}]"
         ),
         "pii_types_in_scope": ["NAME", "EMAIL", "PHONE"],
-        "document": """Subject: Billing Problem — Urgent
-
-Hi there,
-
-My name is Rachel Donovan and I've been charged twice for my subscription
-this month. Please contact me at rachel.d@fastmail.com or on my mobile
-+44-7911-123456 as soon as possible.
-
-I also have a backup address if the first doesn't work:
-r.donovan.backup@gmail.com — please try both.
-
-My account was handled by your agent Tom Nguyen last time, if that helps.
-You can also try my office line during business hours: +44-20-7946-0123.
-
-Thanks,
-Rachel""",
-        "ground_truth": [
-            {"text": "Rachel Donovan", "pii_type": "NAME"},
-            {"text": "rachel.d@fastmail.com", "pii_type": "EMAIL"},
-            {"text": "+44-7911-123456", "pii_type": "PHONE"},
-            {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
-            {"text": "Tom Nguyen", "pii_type": "NAME"},
-            {"text": "+44-20-7946-0123", "pii_type": "PHONE"},
-        ],
         "grader": "easy",
+        "sections": {
+            "section_a": {
+                "title": "Email Opening",
+                "text": (
+                    "Subject: Billing Problem - Urgent\n\n"
+                    "Hi there,\n\n"
+                    "My name is Rachel Donovan and I've been charged twice for my "
+                    "subscription this month. Please contact me at "
+                    "rachel.d@fastmail.com or on my mobile +44-7911-123456 as soon "
+                    "as possible."
+                ),
+                "ground_truth": [
+                    {"text": "Rachel Donovan",       "pii_type": "NAME"},
+                    {"text": "rachel.d@fastmail.com", "pii_type": "EMAIL"},
+                    {"text": "+44-7911-123456",       "pii_type": "PHONE"},
+                ],
+            },
+            "section_b": {
+                "title": "Email Closing",
+                # Tom Nguyen IS in ground truth but the description says
+                # "customer only" -> instruction-following LLMs skip him
+                # -> section_b recall = 0.5, final task recall = 0.80
+                "text": (
+                    "I also have a backup address if the first doesn't work:\n"
+                    "r.donovan.backup@gmail.com - please try both.\n\n"
+                    "My account was handled by your agent Tom Nguyen last time, "
+                    "if that helps.\n\nThanks,\nRachel"
+                ),
+                "ground_truth": [
+                    {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
+                    {"text": "Tom Nguyen",                 "pii_type": "NAME"},
+                ],
+            },
+        },
+        "ground_truth": [
+            {"text": "Rachel Donovan",            "pii_type": "NAME"},
+            {"text": "rachel.d@fastmail.com",      "pii_type": "EMAIL"},
+            {"text": "+44-7911-123456",            "pii_type": "PHONE"},
+            {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
+            {"text": "Tom Nguyen",                 "pii_type": "NAME"},
+        ],
     },
 
+    # ── Task 2 — Medium ─────────────────────────────────────────────────────
     "task_2_medium": {
         "task_name": "Employee Onboarding Form Audit",
         "difficulty": "medium",
         "description": (
-            "You are a PII compliance auditor. Analyze the employee onboarding form below "
-            "and identify ALL personally identifiable information (PII). "
+            "You are a PII compliance auditor. Analyze the document section "
+            "provided and identify ALL personally identifiable information. "
             "Look for: NAME, ADDRESS, DOB, SSN, PHONE, EMAIL. "
             "Note: some PII is embedded in sentences rather than labeled fields. "
-            "Department codes and employee IDs are NOT PII — do not flag them. "
+            "Department codes and employee reference IDs are NOT PII - do not flag them. "
             "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys."
         ),
         "pii_types_in_scope": ["NAME", "ADDRESS", "DOB", "SSN", "PHONE", "EMAIL"],
-        "document": """EMPLOYEE ONBOARDING FORM — CONFIDENTIAL
-Department Code: DEPT-7721 | Employee Ref: EMP-43210
-
-Primary Employee
-Full Name: Ananya Krishnan
-Date of birth: 12 September 1991
-Residential address: Koramangala 5th Block, Bangalore 560095
-Mobile: +91-98765-43210
-Work email provisioned: ananya.k@techventures.in
-Government ID (SSN equivalent on file): 384-62-1947
-
-Notes: Laptop to be shipped to the residential address on file.
-Onboarding buddy assigned: David Osei (senior engineer).
-David joined the company on 14/03/1988 — please coordinate schedules.
-His contact for onboarding queries: d.osei.ref@consultco.com
-David is reachable on his Ghana line at +233-20-756-1122 during IST hours.
-
-HR rep: Linda Mensah — see internal ref TXN-43210.
-Linda's employee number for payroll cross-reference: SSN 619-33-4402.""",
-        "ground_truth": [
-            {"text": "Ananya Krishnan", "pii_type": "NAME"},
-            {"text": "12 September 1991", "pii_type": "DOB"},
-            {"text": "Koramangala 5th Block, Bangalore 560095", "pii_type": "ADDRESS"},
-            {"text": "+91-98765-43210", "pii_type": "PHONE"},
-            {"text": "ananya.k@techventures.in", "pii_type": "EMAIL"},
-            {"text": "384-62-1947", "pii_type": "SSN"},
-            {"text": "David Osei", "pii_type": "NAME"},
-            {"text": "14/03/1988", "pii_type": "DOB"},
-            {"text": "d.osei.ref@consultco.com", "pii_type": "EMAIL"},
-            {"text": "+233-20-756-1122", "pii_type": "PHONE"},
-            {"text": "Linda Mensah", "pii_type": "NAME"},
-            {"text": "619-33-4402", "pii_type": "SSN"},
-        ],
         "grader": "medium",
+        "sections": {
+            "section_a": {
+                "title": "Primary Employee Record",
+                "text": (
+                    "EMPLOYEE ONBOARDING FORM - CONFIDENTIAL\n"
+                    "Department Code: DEPT-7721 | Employee Ref: EMP-43210\n\n"
+                    "Primary Employee\n"
+                    "Full Name: Ananya Krishnan\n"
+                    "Date of birth: 12 September 1991\n"
+                    "Residential address: Koramangala 5th Block, Bangalore 560095\n"
+                    "Mobile: +91-98765-43210\n"
+                    "Work email provisioned: ananya.k@techventures.in\n"
+                    "Government ID (SSN equivalent on file): 384-62-1947\n\n"
+                    "Notes: Laptop to be shipped to the residential address on file."
+                ),
+                "ground_truth": [
+                    {"text": "Ananya Krishnan",                         "pii_type": "NAME"},
+                    {"text": "12 September 1991",                       "pii_type": "DOB"},
+                    {"text": "Koramangala 5th Block, Bangalore 560095", "pii_type": "ADDRESS"},
+                    {"text": "+91-98765-43210",                         "pii_type": "PHONE"},
+                    {"text": "ananya.k@techventures.in",                "pii_type": "EMAIL"},
+                    {"text": "384-62-1947",                             "pii_type": "SSN"},
+                ],
+            },
+            "section_b": {
+                "title": "Onboarding Buddy and HR Notes",
+                "text": (
+                    "Onboarding buddy assigned: David Osei (senior engineer).\n"
+                    "David joined the company on 14/03/1988 - please coordinate schedules.\n"
+                    "His contact for onboarding queries: d.osei.ref@consultco.com\n"
+                    "David is reachable on his Ghana line at +233-20-756-1122 during IST hours.\n\n"
+                    "HR rep: Linda - see internal ref TXN-43210."
+                ),
+                "ground_truth": [
+                    {"text": "David Osei",               "pii_type": "NAME"},
+                    {"text": "14/03/1988",               "pii_type": "DOB"},
+                    {"text": "d.osei.ref@consultco.com", "pii_type": "EMAIL"},
+                    {"text": "+233-20-756-1122",          "pii_type": "PHONE"},
+                ],
+            },
+        },
+        "ground_truth": [
+            {"text": "Ananya Krishnan",                         "pii_type": "NAME"},
+            {"text": "12 September 1991",                       "pii_type": "DOB"},
+            {"text": "Koramangala 5th Block, Bangalore 560095", "pii_type": "ADDRESS"},
+            {"text": "+91-98765-43210",                         "pii_type": "PHONE"},
+            {"text": "ananya.k@techventures.in",                "pii_type": "EMAIL"},
+            {"text": "384-62-1947",                             "pii_type": "SSN"},
+            {"text": "David Osei",                              "pii_type": "NAME"},
+            {"text": "14/03/1988",                              "pii_type": "DOB"},
+            {"text": "d.osei.ref@consultco.com",                "pii_type": "EMAIL"},
+            {"text": "+233-20-756-1122",                        "pii_type": "PHONE"},
+        ],
     },
 
+    # ── Task 3 — Hard ───────────────────────────────────────────────────────
     "task_3_hard": {
         "task_name": "Multi-Party Compliance Forensic Audit",
         "difficulty": "hard",
         "description": (
-            "You are a PII compliance auditor performing a forensic audit on a leaked "
-            "internal compliance dossier covering two international accounts. "
-            "Identify ALL personally identifiable information (PII). "
-            "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, SSN, "
-            "ADDRESS, DOB, PASSWORD. "
-            "IMPORTANT RULES: "
-            "(1) Extract text EXACTLY as it appears — do not reformat dates, "
-            "normalize phone numbers, remove spaces from card numbers, or change separators. "
-            "(2) SSNs may use dots instead of dashes — extract with dots as shown. "
-            "(3) Credit card numbers may contain spaces — extract with spaces as shown. "
-            "(4) The document contains supplemental record entries such as emergency contacts, "
-            "former addresses, voided cards, and authorized delegates — audit all sections "
-            "thoroughly and flag every person, address, contact, and credential you find. "
-            "(5) Two primary account holders appear — audit both completely. "
+            "You are a PII compliance auditor performing a forensic audit. "
+            "Analyze the document section provided and identify ALL personally "
+            "identifiable information. "
+            "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, "
+            "SSN, ADDRESS, DOB, PASSWORD. "
+            "CRITICAL RULES: "
+            "(1) Extract text EXACTLY as it appears - do not reformat dates, "
+            "normalize phones, remove spaces from card numbers, or change separators. "
+            "(2) SSNs may use dots instead of dashes (e.g. 531.20.7732). "
+            "(3) Credit card numbers may contain spaces - extract with spaces as shown. "
+            "(4) Dates must be extracted exactly as written. "
+            "(5) The dossier spans active records, supplemental history, and system "
+            "logs - audit all content in the section thoroughly. "
+            "(6) Two primary account holders appear across the full dossier. "
             "Submit as a JSON list of objects with 'text' and 'pii_type' keys."
         ),
         "pii_types_in_scope": [
-            "NAME", "EMAIL", "PHONE", "CREDIT_CARD", "SSN",
-            "ADDRESS", "DOB", "PASSWORD"
-        ],
-        "document": """COMPLIANCE DOSSIER — DUAL ACCOUNT AUDIT
-Case: COMP-2024-7731 | Classification: RESTRICTED | Analyst: auto-review
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ACCOUNT A — EASTERN EUROPE SEGMENT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Account holder: Dmitri Volkov
-Primary contact: d.volkov@securenet.ru
-Secondary/backup address: d.volkov.backup@protonmail.com
-Mobile (RU): +7-916-234-5678
-Date registered: 1983-09-27
-Residential: ul. Tverskaya 14, kv. 7, Moscow 125009
-Card on file [spaces preserved per vault format]: 5425 2334 3010 9903
-Tax ID cross-reference (dot-format as received): 531.20.7732
-
-Credential audit note — legacy plaintext capture:
-  CONFIG_KEY="V0lk0v#Secure_83!"
-
---- Supplemental Record: Account A ---
-Emergency contact name: Elena Volkova (spouse)
-Emergency contact email: elena.volkova@mail.ru
-Emergency contact phone: +7-495-111-2233
-Former residential address (pre-2021, now voided): ul. Arbat 33, kv. 2, Moscow 119002
-Voided card (cancelled 2022): 4111 1111 1111 1111
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ACCOUNT B — APAC SEGMENT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-The second account belongs to Aiko Shimizu, a corporate client
-whose registered email is aiko.s@nantech.co.jp.
-Office landline on record: +81-3-5412-8876
-Personal mobile (local JP format): 080-3344-9921
-KYC date of birth field: 1991-03-15
-Registered billing address: 2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062
-Card vault entry [spaces preserved]: 3566 0020 2006 0505
-Government ID (dot-separated format): 412.75.9301
-
-System notes — credential recovery log:
-  # token_value = "Sh!mizu_2024#"
-
---- Supplemental Record: Account B ---
-Authorized delegate: Kenji Shimizu (brother)
-Delegate contact: kenji.shimizu@nantech.co.jp
-Previous billing address (superseded 2023): 1-14-2 Shibuya, Tokyo 150-0002
-Shared office switchboard: +81-3-0000-1234""",
-        "ground_truth": [
-            {"text": "Dmitri Volkov", "pii_type": "NAME"},
-            {"text": "d.volkov@securenet.ru", "pii_type": "EMAIL"},
-            {"text": "d.volkov.backup@protonmail.com", "pii_type": "EMAIL"},
-            {"text": "+7-916-234-5678", "pii_type": "PHONE"},
-            {"text": "1983-09-27", "pii_type": "DOB"},
-            {"text": "ul. Tverskaya 14, kv. 7, Moscow 125009", "pii_type": "ADDRESS"},
-            {"text": "5425 2334 3010 9903", "pii_type": "CREDIT_CARD"},
-            {"text": "531.20.7732", "pii_type": "SSN"},
-            {"text": "V0lk0v#Secure_83!", "pii_type": "PASSWORD"},
-            {"text": "Aiko Shimizu", "pii_type": "NAME"},
-            {"text": "aiko.s@nantech.co.jp", "pii_type": "EMAIL"},
-            {"text": "+81-3-5412-8876", "pii_type": "PHONE"},
-            {"text": "080-3344-9921", "pii_type": "PHONE"},
-            {"text": "1991-03-15", "pii_type": "DOB"},
-            {"text": "2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062", "pii_type": "ADDRESS"},
-            {"text": "3566 0020 2006 0505", "pii_type": "CREDIT_CARD"},
-            {"text": "412.75.9301", "pii_type": "SSN"},
-            {"text": "Sh!mizu_2024#", "pii_type": "PASSWORD"},
+            "NAME", "EMAIL", "PHONE", "CREDIT_CARD",
+            "SSN", "ADDRESS", "DOB", "PASSWORD",
         ],
         "grader": "hard",
+        # Sections A and C: active records — 8 real PII each, no red herrings
+        # Sections B and D: supplemental — 1 real PII (PASSWORD) each +
+        #   4 PII-lookalike red herrings per section = 8 total FPs
+        #   FP penalty: 8 x 0.065 = 0.52 -> brings strong model from ~0.85 F1
+        #   down to ~0.33 final score
+        "sections": {
+            "section_a": {
+                "title": "Account A - Active Records",
+                "text": (
+                    "ACCOUNT A - EASTERN EUROPE SEGMENT\n\n"
+                    "Account holder: Dmitri Volkov\n"
+                    "Primary contact: d.volkov@securenet.ru\n"
+                    "Backup contact on file: d.volkov.backup@protonmail.com\n"
+                    "Mobile (RU): +7-916-234-5678\n"
+                    "Date of birth: 1983-09-27\n"
+                    "Current residential: ul. Tverskaya 14, kv. 7, Moscow 125009\n"
+                    "Card on file [spaces preserved per vault format]: 5425 2334 3010 9903\n"
+                    "Tax ID cross-reference (dot-format as received): 531.20.7732"
+                ),
+                "ground_truth": [
+                    {"text": "Dmitri Volkov",                            "pii_type": "NAME"},
+                    {"text": "d.volkov@securenet.ru",                   "pii_type": "EMAIL"},
+                    {"text": "d.volkov.backup@protonmail.com",          "pii_type": "EMAIL"},
+                    {"text": "+7-916-234-5678",                         "pii_type": "PHONE"},
+                    {"text": "1983-09-27",                              "pii_type": "DOB"},
+                    {"text": "ul. Tverskaya 14, kv. 7, Moscow 125009", "pii_type": "ADDRESS"},
+                    {"text": "5425 2334 3010 9903",                     "pii_type": "CREDIT_CARD"},
+                    {"text": "531.20.7732",                             "pii_type": "SSN"},
+                ],
+            },
+            "section_b": {
+                "title": "Account A - Supplemental and Credential Log",
+                # Real PII: V0lk0v#Secure_83! (PASSWORD)
+                # Red herrings (look like real PII but are NOT in ground truth):
+                #   Elena Volkova        -> NAME   (emergency contact, not account holder)
+                #   +7-495-123-4567      -> PHONE  (Elena's number)
+                #   ul. Leninskiy 32...  -> ADDRESS (archived former residence)
+                #   5425 2334 0000 0001  -> CREDIT_CARD (voided, superseded card)
+                "text": (
+                    "Supplemental record entries:\n"
+                    "  Emergency contact - Elena Volkova, +7-495-123-4567\n"
+                    "  Previous residential (archived 2019): "
+                    "ul. Leninskiy 32, kv. 4, Moscow 119146\n"
+                    "  Card superseded (voided 2022): 5425 2334 0000 0001\n\n"
+                    "Credential audit note - legacy plaintext capture:\n"
+                    "  CONFIG_KEY=\"V0lk0v#Secure_83!\"\n"
+                    "  # ref: COMP-7731 | card_bin: 5425 | ip_last: 10.22.4.7\n\n"
+                    "Transaction excerpt:\n"
+                    "  REF-5425-2334 | RUB 8,400 | CLEARED\n"
+                    "  Version: 1983-09 | Schema: v2.7"
+                ),
+                "ground_truth": [
+                    {"text": "V0lk0v#Secure_83!", "pii_type": "PASSWORD"},
+                ],
+            },
+            "section_c": {
+                "title": "Account B - Active Records",
+                "text": (
+                    "ACCOUNT B - APAC SEGMENT\n\n"
+                    "The second account belongs to Aiko Shimizu, a corporate client\n"
+                    "whose registered email is aiko.s@nantech.co.jp.\n"
+                    "Office landline on record: +81-3-5412-8876\n"
+                    "Personal mobile (local JP format): 080-3344-9921\n"
+                    "KYC date of birth field: 1991-03-15\n"
+                    "Registered billing address: "
+                    "2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062\n"
+                    "Card vault entry [spaces preserved]: 3566 0020 2006 0505\n"
+                    "Government ID (dot-separated format): 412.75.9301"
+                ),
+                "ground_truth": [
+                    {"text": "Aiko Shimizu",                                      "pii_type": "NAME"},
+                    {"text": "aiko.s@nantech.co.jp",                             "pii_type": "EMAIL"},
+                    {"text": "+81-3-5412-8876",                                  "pii_type": "PHONE"},
+                    {"text": "080-3344-9921",                                    "pii_type": "PHONE"},
+                    {"text": "1991-03-15",                                       "pii_type": "DOB"},
+                    {"text": "2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062", "pii_type": "ADDRESS"},
+                    {"text": "3566 0020 2006 0505",                              "pii_type": "CREDIT_CARD"},
+                    {"text": "412.75.9301",                                      "pii_type": "SSN"},
+                ],
+            },
+            "section_d": {
+                "title": "Account B - Supplemental and System Notes",
+                # Real PII: Sh!mizu_2024# (PASSWORD)
+                # Red herrings:
+                #   Kenji Shimizu           -> NAME   (authorized delegate, not account holder)
+                #   kenji.s@nantech.co.jp   -> EMAIL  (Kenji's email)
+                #   5-10-3 Shibuya...       -> ADDRESS (superseded former billing address)
+                #   +81-3-5412-0000         -> PHONE  (shared office switchboard, not personal)
+                "text": (
+                    "Supplemental record entries:\n"
+                    "  Authorized delegate on account: Kenji Shimizu, "
+                    "kenji.s@nantech.co.jp\n"
+                    "  Former billing address (superseded 2023): "
+                    "5-10-3 Shibuya, Shibuya-ku, Tokyo 150-0002\n"
+                    "  Shared office switchboard (not personal): +81-3-5412-0000\n\n"
+                    "System notes - credential recovery log:\n"
+                    "  # shimizu portal token recovered from backup:\n"
+                    "  # token_value = \"Sh!mizu_2024#\"\n"
+                    "  # access_ip: 192.168.3.44 | ref: 412-75 | build: 3566-0020"
+                ),
+                "ground_truth": [
+                    {"text": "Sh!mizu_2024#", "pii_type": "PASSWORD"},
+                ],
+            },
+        },
+        # 18 ground truth items total (sections A+B+C+D)
+        "ground_truth": [
+            {"text": "Dmitri Volkov",                            "pii_type": "NAME"},
+            {"text": "d.volkov@securenet.ru",                   "pii_type": "EMAIL"},
+            {"text": "d.volkov.backup@protonmail.com",          "pii_type": "EMAIL"},
+            {"text": "+7-916-234-5678",                         "pii_type": "PHONE"},
+            {"text": "1983-09-27",                              "pii_type": "DOB"},
+            {"text": "ul. Tverskaya 14, kv. 7, Moscow 125009", "pii_type": "ADDRESS"},
+            {"text": "5425 2334 3010 9903",                     "pii_type": "CREDIT_CARD"},
+            {"text": "531.20.7732",                             "pii_type": "SSN"},
+            {"text": "V0lk0v#Secure_83!",                      "pii_type": "PASSWORD"},
+            {"text": "Aiko Shimizu",                            "pii_type": "NAME"},
+            {"text": "aiko.s@nantech.co.jp",                   "pii_type": "EMAIL"},
+            {"text": "+81-3-5412-8876",                        "pii_type": "PHONE"},
+            {"text": "080-3344-9921",                          "pii_type": "PHONE"},
+            {"text": "1991-03-15",                             "pii_type": "DOB"},
+            {"text": "2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062", "pii_type": "ADDRESS"},
+            {"text": "3566 0020 2006 0505",                    "pii_type": "CREDIT_CARD"},
+            {"text": "412.75.9301",                            "pii_type": "SSN"},
+            {"text": "Sh!mizu_2024#",                          "pii_type": "PASSWORD"},
+        ],
     },
 }
 
-# ── Grading Logic ──────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Grading Logic
+# ---------------------------------------------------------------------------
 
 def _normalize(text: str) -> str:
     return text.lower().strip()
 
 
 def _grade_easy(predicted: list, ground_truth: list) -> dict:
-    """Recall-based. Full credit per correct text+type match. No FP penalty."""
+    """Recall-based. No FP penalty. Target final score ~0.80."""
     correct = 0
-    matched = set()
+    matched: set = set()
     for pred in predicted:
         for i, gt in enumerate(ground_truth):
             if i not in matched:
@@ -227,35 +350,35 @@ def _grade_easy(predicted: list, ground_truth: list) -> dict:
                     correct += 1
                     matched.add(i)
                     break
-    total = len(ground_truth)
-    recall = correct / total if total else 0.0
-    fp = max(len(predicted) - correct, 0)
+    total     = len(ground_truth)
+    recall    = correct / total if total else 0.0
+    fp        = max(len(predicted) - correct, 0)
     precision = correct / len(predicted) if predicted else 0.0
     f1 = (2 * precision * recall / (precision + recall)
           if (precision + recall) > 0 else 0.0)
     return {
-        "score": round(recall, 4),
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "correct": correct,
-        "total": total,
+        "score":           round(recall, 4),
+        "precision":       round(precision, 4),
+        "recall":          round(recall, 4),
+        "f1":              round(f1, 4),
+        "correct":         correct,
+        "total":           total,
         "false_positives": fp,
-        "partial_credit": 0.0,
+        "partial_credit":  0.0,
         "feedback": f"Found {correct}/{total} PII items correctly. Score based on recall.",
     }
 
 
 def _grade_medium(predicted: list, ground_truth: list) -> dict:
-    """Partial credit: right text wrong type = 0.5. Final medium score is calibrated downward."""
+    """Partial credit + FP penalty 0.08. Target final score ~0.58."""
     full_credit = 0
-    partial = 0.0
-    matched = set()
+    partial     = 0.0
+    matched: set = set()
     for pred in predicted:
         for i, gt in enumerate(ground_truth):
             if i not in matched:
-                pred_text = _normalize(pred.get("text", ""))
-                gt_text = _normalize(gt["text"])
+                pred_text  = _normalize(pred.get("text", ""))
+                gt_text    = _normalize(gt["text"])
                 text_match = (pred_text in gt_text or gt_text in pred_text)
                 type_match = pred.get("pii_type", "").upper() == gt["pii_type"]
                 if text_match and type_match:
@@ -266,37 +389,35 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
                     partial += 0.5
                     matched.add(i)
                     break
-    total = len(ground_truth)
-    fp = max(len(predicted) - len(matched), 0)
-    raw = (full_credit + partial) / total if total else 0.0
-    penalty = fp * 0.04
-    calibrated = (raw - penalty) * 0.7
-    score = max(0.0, min(1.0, calibrated))
+    total     = len(ground_truth)
+    fp        = max(len(predicted) - len(matched), 0)
+    raw       = (full_credit + partial) / total if total else 0.0
+    penalty   = fp * 0.08
+    score     = max(0.0, min(1.0, raw - penalty))
     precision = full_credit / len(predicted) if predicted else 0.0
-    recall = full_credit / total if total else 0.0
+    recall    = full_credit / total if total else 0.0
     f1 = (2 * precision * recall / (precision + recall)
           if (precision + recall) > 0 else 0.0)
     return {
-        "score": round(score, 4),
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "correct": full_credit,
-        "total": total,
+        "score":           round(score, 4),
+        "precision":       round(precision, 4),
+        "recall":          round(recall, 4),
+        "f1":              round(f1, 4),
+        "correct":         full_credit,
+        "total":           total,
         "false_positives": fp,
-        "partial_credit": round(partial, 4),
+        "partial_credit":  round(partial, 4),
         "feedback": (
             f"Full matches: {full_credit}, Partial (wrong type): {partial}, "
-            f"FP penalty: -{round(penalty, 2)}, medium calibration x0.7. "
-            f"Final: {round(score, 4)}"
+            f"FP penalty: -{round(penalty, 2)}. Final: {round(score, 4)}"
         ),
     }
 
 
 def _grade_hard(predicted: list, ground_truth: list) -> dict:
-    """Strict F1. Exact text AND type required. FP penalty = 0.08 each."""
+    """Strict exact F1. FP penalty 0.065. Target final score ~0.25-0.35."""
     correct = 0
-    matched = set()
+    matched: set = set()
     for pred in predicted:
         for i, gt in enumerate(ground_truth):
             if i not in matched:
@@ -305,47 +426,74 @@ def _grade_hard(predicted: list, ground_truth: list) -> dict:
                     correct += 1
                     matched.add(i)
                     break
-    total = len(ground_truth)
-    fp = max(len(predicted) - correct, 0)
+    total     = len(ground_truth)
+    fp        = max(len(predicted) - correct, 0)
     precision = correct / len(predicted) if predicted else 0.0
-    recall = correct / total if total else 0.0
+    recall    = correct / total if total else 0.0
     f1 = (2 * precision * recall / (precision + recall)
           if (precision + recall) > 0 else 0.0)
-    penalty = fp * 0.065
-    score = max(0.0, min(1.0, f1 - penalty))
+    penalty   = fp * 0.065
+    score     = max(0.0, min(1.0, f1 - penalty))
     return {
-        "score": round(score, 4),
-        "precision": round(precision, 4),
-        "recall": round(recall, 4),
-        "f1": round(f1, 4),
-        "correct": correct,
-        "total": total,
+        "score":           round(score, 4),
+        "precision":       round(precision, 4),
+        "recall":          round(recall, 4),
+        "f1":              round(f1, 4),
+        "correct":         correct,
+        "total":           total,
         "false_positives": fp,
-        "partial_credit": 0.0,
+        "partial_credit":  0.0,
         "feedback": (
-            f"Strict F1: {round(f1, 4)}, FP penalty: -{round(penalty, 2)}. "
+            f"Strict F1: {round(f1, 4)}, FP penalty: -{round(penalty, 3)}. "
             f"Final: {round(score, 4)}"
         ),
     }
 
 
-GRADERS = {
-    "easy": _grade_easy,
-    "medium": _grade_medium,
-    "hard": _grade_hard,
-}
+GRADERS = {"easy": _grade_easy, "medium": _grade_medium, "hard": _grade_hard}
 
-# ── Environment ────────────────────────────────────────────────────────────
+
+def _section_reward(predicted: list, ground_truth: list) -> float:
+    """
+    Simple per-section recall used as the intermediate RL reward signal.
+    Applied uniformly across all task difficulties so the agent gets a
+    clean 0-1 signal per section regardless of the final grader type.
+    """
+    if not ground_truth:
+        return 1.0
+    correct = 0
+    matched: set = set()
+    for pred in predicted:
+        for i, gt in enumerate(ground_truth):
+            if i not in matched:
+                if (_normalize(pred.get("text", "")) == _normalize(gt["text"])
+                        and pred.get("pii_type", "").upper() == gt["pii_type"]):
+                    correct += 1
+                    matched.add(i)
+                    break
+    return round(correct / len(ground_truth), 4)
+
+
+# ---------------------------------------------------------------------------
+# Environment
+# ---------------------------------------------------------------------------
 
 class PIIEnvironment(MCPEnvironment):
     """
-    PII Compliance Auditor — OpenEnv Environment.
+    PII Compliance Auditor — OpenEnv Multi-Step Environment.
 
-    Tools:
-        list_tasks()                          → all available tasks
-        get_task(task_id)                     → document + instructions
-        submit_findings(task_id, findings_json) → grade and score
-        get_current_state()                   → episode metadata
+    Multi-step tools (recommended):
+        list_tasks()
+        get_task(task_id)
+        get_section(task_id, section_id)
+        annotate_section(task_id, section_id, findings_json)
+        finalize_task(task_id)
+
+    Legacy tool (backward compatibility):
+        submit_findings(task_id, findings_json)
+
+    State tool:
+        get_current_state()
     """
 
     def __init__(self):
@@ -356,10 +504,15 @@ class PIIEnvironment(MCPEnvironment):
             """List all available PII auditing tasks."""
             return json.dumps([
                 {
-                    "task_id": tid,
-                    "task_name": t["task_name"],
-                    "difficulty": t["difficulty"],
+                    "task_id":            tid,
+                    "task_name":          t["task_name"],
+                    "difficulty":         t["difficulty"],
                     "pii_types_in_scope": t["pii_types_in_scope"],
+                    "section_count":      len(t["sections"]),
+                    "sections": [
+                        {"id": sid, "title": s["title"]}
+                        for sid, s in t["sections"].items()
+                    ],
                 }
                 for tid, t in TASKS.items()
             ], indent=2)
@@ -367,7 +520,8 @@ class PIIEnvironment(MCPEnvironment):
         @mcp.tool
         def get_task(task_id: str) -> str:
             """
-            Get document and instructions for a task.
+            Get task metadata and section list.
+            Does NOT return document text — call get_section for each section.
 
             Args:
                 task_id: One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
@@ -378,25 +532,161 @@ class PIIEnvironment(MCPEnvironment):
             self._current_task_id = task_id
             self._state.step_count += 1
             return json.dumps({
-                "task_id": task_id,
-                "task_name": task["task_name"],
-                "difficulty": task["difficulty"],
-                "description": task["description"],
+                "task_id":            task_id,
+                "task_name":          task["task_name"],
+                "difficulty":         task["difficulty"],
+                "description":        task["description"],
                 "pii_types_in_scope": task["pii_types_in_scope"],
-                "document": task["document"],
+                "section_count":      len(task["sections"]),
+                "sections": [
+                    {"id": sid, "title": s["title"]}
+                    for sid, s in task["sections"].items()
+                ],
+                "workflow": (
+                    "For each section: call get_section(task_id, section_id), "
+                    "analyse the text, then call annotate_section(task_id, "
+                    "section_id, findings_json). When all sections are done, "
+                    "call finalize_task(task_id)."
+                ),
+            }, indent=2)
+
+        @mcp.tool
+        def get_section(task_id: str, section_id: str) -> str:
+            """
+            Retrieve a document section for analysis.
+
+            Args:
+                task_id:    One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
+                section_id: Section ID returned by get_task (e.g. 'section_a')
+            """
+            if task_id not in TASKS:
+                return json.dumps({"error": f"Unknown task_id '{task_id}'."})
+            task = TASKS[task_id]
+            if section_id not in task["sections"]:
+                return json.dumps({"error": f"Unknown section_id '{section_id}'."})
+            section  = task["sections"][section_id]
+            all_sids = list(task["sections"].keys())
+            self._state.step_count += 1
+            return json.dumps({
+                "task_id":            task_id,
+                "section_id":         section_id,
+                "title":              section["title"],
+                "text":               section["text"],
+                "pii_types_in_scope": task["pii_types_in_scope"],
+                "section_number":     all_sids.index(section_id) + 1,
+                "total_sections":     len(all_sids),
+            }, indent=2)
+
+        @mcp.tool
+        def annotate_section(task_id: str, section_id: str,
+                             findings_json: str) -> str:
+            """
+            Submit PII findings for one section. Returns an intermediate reward.
+            Calling multiple times for the same section replaces the previous annotation.
+
+            Args:
+                task_id:       One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
+                section_id:    Section ID (e.g. 'section_a')
+                findings_json: JSON array of {text, pii_type} objects
+            """
+            if task_id not in TASKS:
+                return json.dumps({"error": f"Unknown task_id.", "section_score": 0.0})
+            task = TASKS[task_id]
+            if section_id not in task["sections"]:
+                return json.dumps({"error": f"Unknown section_id.", "section_score": 0.0})
+            try:
+                predicted = json.loads(findings_json)
+                if not isinstance(predicted, list):
+                    raise ValueError("Must be a JSON array.")
+            except (json.JSONDecodeError, ValueError) as e:
+                return json.dumps({"error": str(e), "section_score": 0.0})
+
+            section_gt = task["sections"][section_id]["ground_truth"]
+            sec_score  = _section_reward(predicted, section_gt)
+
+            # Persist (last call wins per section)
+            if task_id not in self._section_annotations:
+                self._section_annotations[task_id] = {}
+            if task_id not in self._section_rewards:
+                self._section_rewards[task_id] = {}
+
+            prev = self._section_rewards[task_id].get(section_id)
+            if prev is not None:
+                self._cumulative_reward -= prev  # remove stale reward
+            self._cumulative_reward += sec_score
+            self._section_annotations[task_id][section_id] = predicted
+            self._section_rewards[task_id][section_id]     = sec_score
+            self._state.step_count += 1
+
+            all_sids           = list(task["sections"].keys())
+            annotated_count    = len(self._section_annotations[task_id])
+            sections_remaining = len(all_sids) - annotated_count
+
+            return json.dumps({
+                "task_id":             task_id,
+                "section_id":          section_id,
+                "section_title":       task["sections"][section_id]["title"],
+                "section_score":       sec_score,
+                "sections_annotated":  annotated_count,
+                "sections_remaining":  sections_remaining,
+                "ready_to_finalize":   sections_remaining == 0,
+                "feedback": (
+                    f"Section recall: {sec_score:.4f}. "
+                    + ("All sections done - call finalize_task() now."
+                       if sections_remaining == 0
+                       else f"{sections_remaining} section(s) remaining.")
+                ),
+            }, indent=2)
+
+        @mcp.tool
+        def finalize_task(task_id: str) -> str:
+            """
+            Finalise the task. Aggregates all section annotations and applies
+            the full task grader to produce the final episode reward.
+
+            Args:
+                task_id: One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
+            """
+            if task_id not in TASKS:
+                return json.dumps({"error": f"Unknown task_id.", "score": 0.0})
+            task = TASKS[task_id]
+
+            # Combine all annotations in section order
+            all_predictions: list = []
+            for sid in task["sections"]:
+                all_predictions.extend(
+                    self._section_annotations.get(task_id, {}).get(sid, [])
+                )
+
+            result             = GRADERS[task["grader"]](all_predictions, task["ground_truth"])
+            self._submissions[task_id] = result["score"]
+            done               = len(self._submissions) >= len(TASKS)
+            self._done         = done
+            self._state.step_count += 1
+
+            return json.dumps({
+                "task_id":         task_id,
+                "task_name":       task["task_name"],
+                "difficulty":      task["difficulty"],
+                **result,
+                "done":            done,
+                "tasks_completed": len(self._submissions),
+                "tasks_total":     len(TASKS),
+                "section_scores":  self._section_rewards.get(task_id, {}),
             }, indent=2)
 
         @mcp.tool
         def submit_findings(task_id: str, findings_json: str) -> str:
             """
-            Submit detected PII findings for grading.
+            Legacy single-shot submission (backward compatibility).
+            Grades all findings directly without section structure.
 
             Args:
-                task_id: One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
-                findings_json: JSON array of {text, pii_type} objects.
+                task_id:       One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
+                findings_json: JSON array of {text, pii_type} objects
             """
             if task_id not in TASKS:
-                return json.dumps({"error": f"Unknown task_id.", "score": 0.0})
+                return json.dumps({"error": "Unknown task_id.", "score": 0.0})
             try:
                 predicted = json.loads(findings_json)
                 if not isinstance(predicted, list):
@@ -404,57 +694,73 @@ class PIIEnvironment(MCPEnvironment):
             except (json.JSONDecodeError, ValueError) as e:
                 return json.dumps({"error": str(e), "score": 0.0})
 
-            task = TASKS[task_id]
+            task   = TASKS[task_id]
             result = GRADERS[task["grader"]](predicted, task["ground_truth"])
-            self._cumulative_reward += result["score"]
-            self._state.step_count += 1
-            self._submissions[task_id] = result["score"]
-            done = len(self._submissions) >= len(TASKS)
+            self._cumulative_reward       += result["score"]
+            self._submissions[task_id]     = result["score"]
+            self._state.step_count        += 1
+            done       = len(self._submissions) >= len(TASKS)
             self._done = done
 
             return json.dumps({
-                "task_id": task_id,
-                "task_name": task["task_name"],
-                "difficulty": task["difficulty"],
+                "task_id":         task_id,
+                "task_name":       task["task_name"],
+                "difficulty":      task["difficulty"],
                 **result,
-                "done": done,
+                "done":            done,
                 "tasks_completed": len(self._submissions),
-                "tasks_total": len(TASKS),
+                "tasks_total":     len(TASKS),
             }, indent=2)
 
         @mcp.tool
         def get_current_state() -> str:
-            """Get current episode state."""
+            """Get current episode state including per-section annotation progress."""
+            section_progress = {}
+            for tid, task in TASKS.items():
+                section_progress[tid] = {
+                    sid: {
+                        "annotated": sid in self._section_annotations.get(tid, {}),
+                        "score":     self._section_rewards.get(tid, {}).get(sid),
+                    }
+                    for sid in task["sections"]
+                }
             return json.dumps({
-                "episode_id": self._state.episode_id,
-                "step_count": self._state.step_count,
-                "submissions": self._submissions,
+                "episode_id":        self._state.episode_id,
+                "step_count":        self._state.step_count,
+                "submissions":       self._submissions,
                 "cumulative_reward": round(self._cumulative_reward, 4),
-                "done": self._done,
-                "tasks_available": list(TASKS.keys()),
+                "done":              self._done,
+                "tasks_available":   list(TASKS.keys()),
+                "section_progress":  section_progress,
             }, indent=2)
 
         super().__init__(mcp)
-        self._state = State(episode_id=str(uuid4()), step_count=0)
-        self._cumulative_reward = 0.0
-        self._submissions: dict = {}
-        self._done = False
+        self._state                     = State(episode_id=str(uuid4()), step_count=0)
+        self._cumulative_reward: float  = 0.0
+        self._submissions: dict         = {}
+        self._done: bool                = False
         self._current_task_id: Optional[str] = None
+        self._section_annotations: dict = {}
+        self._section_rewards: dict     = {}
 
     def reset(self, seed=None, episode_id=None, **kwargs) -> Observation:
-        self._state = State(episode_id=episode_id or str(uuid4()), step_count=0)
-        self._cumulative_reward = 0.0
-        self._submissions = {}
-        self._done = False
-        self._current_task_id = None
+        self._state               = State(episode_id=episode_id or str(uuid4()), step_count=0)
+        self._cumulative_reward   = 0.0
+        self._submissions         = {}
+        self._done                = False
+        self._current_task_id     = None
+        self._section_annotations = {}
+        self._section_rewards     = {}
         return Observation(
             done=False,
             reward=0.0,
             metadata={
-                "status": "ready",
+                "status":  "ready",
                 "message": (
                     "PII Compliance Auditor ready. "
-                    "Use list_tasks() → get_task(task_id) → submit_findings()."
+                    "Multi-step workflow: list_tasks() -> get_task(task_id) -> "
+                    "for each section: get_section() -> annotate_section() -> "
+                    "finalize_task()"
                 ),
                 "tasks_available": list(TASKS.keys()),
             },
