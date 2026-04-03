@@ -51,6 +51,7 @@ I also have a backup address if the first doesn't work:
 r.donovan.backup@gmail.com — please try both.
 
 My account was handled by your agent Tom Nguyen last time, if that helps.
+You can also try my office line during business hours: +44-20-7946-0123.
 
 Thanks,
 Rachel""",
@@ -60,6 +61,7 @@ Rachel""",
             {"text": "+44-7911-123456", "pii_type": "PHONE"},
             {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
             {"text": "Tom Nguyen", "pii_type": "NAME"},
+            {"text": "+44-20-7946-0123", "pii_type": "PHONE"},
         ],
         "grader": "easy",
     },
@@ -93,7 +95,8 @@ David joined the company on 14/03/1988 — please coordinate schedules.
 His contact for onboarding queries: d.osei.ref@consultco.com
 David is reachable on his Ghana line at +233-20-756-1122 during IST hours.
 
-HR rep: Linda — see internal ref TXN-43210.""",
+HR rep: Linda Mensah — see internal ref TXN-43210.
+Linda's employee number for payroll cross-reference: SSN 619-33-4402.""",
         "ground_truth": [
             {"text": "Ananya Krishnan", "pii_type": "NAME"},
             {"text": "12 September 1991", "pii_type": "DOB"},
@@ -105,6 +108,7 @@ HR rep: Linda — see internal ref TXN-43210.""",
             {"text": "14/03/1988", "pii_type": "DOB"},
             {"text": "d.osei.ref@consultco.com", "pii_type": "EMAIL"},
             {"text": "+233-20-756-1122", "pii_type": "PHONE"},
+            {"text": "Linda Mensah", "pii_type": "NAME"},
         ],
         "grader": "medium",
     },
