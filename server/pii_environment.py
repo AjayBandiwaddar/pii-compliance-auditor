@@ -114,80 +114,90 @@ HR rep: Linda — see internal ref TXN-43210.""",
         "difficulty": "hard",
         "description": (
             "You are a PII compliance auditor performing a forensic audit on a leaked "
-            "internal document containing form data, transaction logs, and support notes. "
+            "internal compliance dossier covering two international accounts. "
             "Identify ALL personally identifiable information (PII). "
             "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, SSN, "
             "ADDRESS, DOB, PASSWORD. "
-            "CRITICAL WARNINGS: "
-            "(1) The document contains red herrings — partial card numbers, IP addresses, "
-            "version strings, reference codes, and SSN fragments. Do NOT flag these. "
-            "(2) Two different individuals appear in the document — audit both. "
-            "(3) Some formats are non-standard: credit cards use spaces, Japanese phone "
-            "numbers have no country code, addresses may be non-Western. "
-            "(4) Passwords appear inside technical notes without obvious labels. "
-            "Extract EXACT text as it appears. Both text AND pii_type must be correct."
+            "CRITICAL RULES: "
+            "(1) Extract text EXACTLY as it appears in the document — do not reformat dates, "
+            "normalize phone numbers, remove spaces from card numbers, or change separators. "
+            "(2) SSNs may use dots instead of dashes (e.g. 531.20.7732 — extract with dots). "
+            "(3) Credit card numbers may contain spaces — extract with spaces as shown. "
+            "(4) Phone numbers must be extracted in the exact format they appear. "
+            "(5) Dates must be extracted exactly as written, not converted to another format. "
+            "(6) The document contains red herrings: reference codes, partial numbers, "
+            "IP addresses, and version strings — do not flag these. "
+            "(7) Two individuals appear — audit both completely. "
+            "Submit as a JSON list of objects with 'text' and 'pii_type' keys."
         ),
         "pii_types_in_scope": [
             "NAME", "EMAIL", "PHONE", "CREDIT_CARD", "SSN",
             "ADDRESS", "DOB", "PASSWORD"
         ],
-        "document": """INTERNAL AUDIT EXPORT — RESTRICTED
-Reference: AUD-2024-3391 | Date: 2024-11-05 | Analyst: compliance-bot
+        "document": """COMPLIANCE DOSSIER — DUAL ACCOUNT AUDIT
+Case: COMP-2024-7731 | Classification: RESTRICTED | Analyst: auto-review
 
-=== RECORD 1: CUSTOMER ACCOUNT (EU) ===
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACCOUNT A — EASTERN EUROPE SEGMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Account holder: Isabel Ferreira
-Registered email: i.ferreira@netcorp.pt
-Date of birth on file: 1987-06-14
-Primary card: 4532 0151 1283 0366
-Billing address: Rua das Flores 22, 1200-195 Lisboa, Portugal
-Support line: +351-91-234-5678
-Govt ID cross-ref: 221-54-8832
-Last known credential (plaintext capture from legacy system):
-  stored_pwd = "Tr0ub4dor&3!"
+Account holder: Dmitri Volkov
+Primary contact: d.volkov@securenet.ru
+Secondary/backup address: d.volkov.backup@protonmail.com
+Mobile (RU): +7-916-234-5678
+Date registered: 1983-09-27
+Residential: ul. Tverskaya 14, kv. 7, Moscow 125009
+Card on file [spaces preserved per vault format]: 5425 2334 3010 9903
+Tax ID cross-reference (dot-format as received): 531.20.7732
 
-Transaction log excerpt:
-  TXN-4532-0151 | EUR 142.00 | APPROVED | ref: 221-54 | ip: 192.168.10.5
-  Card BIN: 4532 | Scheme: VISA | Version: 1987-06
+Credential audit note — legacy plaintext capture:
+  CONFIG_KEY="V0lk0v#Secure_83!"
+  # ref: COMP-7731 | card_bin: 5425 | ip_last: 10.22.4.7
 
-=== RECORD 2: PARTNER ACCOUNT (APAC) ===
+Transaction excerpt:
+  REF-5425-2334 | RUB 8,400 | CLEARED
+  Version: 1983-09 | Schema: v2.7
 
-The second account is registered to one Hiroshi Tanaka, a corporate
-partner based in Tokyo. His registered contact is
-h.tanaka.work@jp-systems.co.jp and billing is routed to card
-4916 1234 5678 9012 (exp 03/27).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ACCOUNT B — APAC SEGMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Registered address: 3-7-1 Shinjuku, Tokyo 160-0022
-Date of birth as per KYC submission: 1979-11-30
-Local contact number: 090-4432-8871
-System credential recovered from config backup:
-  # tanaka admin token: K@ts0_2024#jp
+The second account belongs to Aiko Shimizu, a corporate client
+whose registered email is aiko.s@nantech.co.jp.
+Office landline on record: +81-3-5412-8876
+Personal mobile (local JP format): 080-3344-9921
+KYC date of birth field: 1991-03-15
+Registered billing address: 2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062
+Card vault entry [spaces preserved]: 3566 0020 2006 0505
+Government ID (dot-separated format): 412.75.9301
 
-Support notes:
-  - Opened ticket ref 4916-1234 re: billing dispute (not a card number)
-  - DOB field showed 1979-11 initially (data entry error, now corrected)
-  - IP at time of access: 10.0.4.88""",
+System notes — credential recovery log:
+  # shimizu portal token recovered from backup:
+  # token_value = "Sh!mizu_2024#"
+  # access_ip: 192.168.3.44 | ref: 412-75 | build: 3566-0020""",
         "ground_truth": [
-            {"text": "Isabel Ferreira", "pii_type": "NAME"},
-            {"text": "i.ferreira@netcorp.pt", "pii_type": "EMAIL"},
-            {"text": "1987-06-14", "pii_type": "DOB"},
-            {"text": "4532 0151 1283 0366", "pii_type": "CREDIT_CARD"},
-            {"text": "Rua das Flores 22, 1200-195 Lisboa, Portugal", "pii_type": "ADDRESS"},
-            {"text": "+351-91-234-5678", "pii_type": "PHONE"},
-            {"text": "221-54-8832", "pii_type": "SSN"},
-            {"text": "Tr0ub4dor&3!", "pii_type": "PASSWORD"},
-            {"text": "Hiroshi Tanaka", "pii_type": "NAME"},
-            {"text": "h.tanaka.work@jp-systems.co.jp", "pii_type": "EMAIL"},
-            {"text": "4916 1234 5678 9012", "pii_type": "CREDIT_CARD"},
-            {"text": "3-7-1 Shinjuku, Tokyo 160-0022", "pii_type": "ADDRESS"},
-            {"text": "1979-11-30", "pii_type": "DOB"},
-            {"text": "090-4432-8871", "pii_type": "PHONE"},
-            {"text": "K@ts0_2024#jp", "pii_type": "PASSWORD"},
+            {"text": "Dmitri Volkov", "pii_type": "NAME"},
+            {"text": "d.volkov@securenet.ru", "pii_type": "EMAIL"},
+            {"text": "d.volkov.backup@protonmail.com", "pii_type": "EMAIL"},
+            {"text": "+7-916-234-5678", "pii_type": "PHONE"},
+            {"text": "1983-09-27", "pii_type": "DOB"},
+            {"text": "ul. Tverskaya 14, kv. 7, Moscow 125009", "pii_type": "ADDRESS"},
+            {"text": "5425 2334 3010 9903", "pii_type": "CREDIT_CARD"},
+            {"text": "531.20.7732", "pii_type": "SSN"},
+            {"text": "V0lk0v#Secure_83!", "pii_type": "PASSWORD"},
+            {"text": "Aiko Shimizu", "pii_type": "NAME"},
+            {"text": "aiko.s@nantech.co.jp", "pii_type": "EMAIL"},
+            {"text": "+81-3-5412-8876", "pii_type": "PHONE"},
+            {"text": "080-3344-9921", "pii_type": "PHONE"},
+            {"text": "1991-03-15", "pii_type": "DOB"},
+            {"text": "2-8-12 Minami-Aoyama, Minato-ku, Tokyo 107-0062", "pii_type": "ADDRESS"},
+            {"text": "3566 0020 2006 0505", "pii_type": "CREDIT_CARD"},
+            {"text": "412.75.9301", "pii_type": "SSN"},
+            {"text": "Sh!mizu_2024#", "pii_type": "PASSWORD"},
         ],
         "grader": "hard",
     },
 }
-
 # ── Grading Logic ──────────────────────────────────────────────────────────
 
 def _normalize(text: str) -> str:
