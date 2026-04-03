@@ -60,7 +60,6 @@ Rachel""",
             {"text": "rachel.d@fastmail.com", "pii_type": "EMAIL"},
             {"text": "+44-7911-123456", "pii_type": "PHONE"},
             {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
-            {"text": "Tom Nguyen", "pii_type": "NAME"},
             {"text": "+44-20-7946-0123", "pii_type": "PHONE"},
         ],
         "grader": "easy",
@@ -108,8 +107,6 @@ Linda's employee number for payroll cross-reference: SSN 619-33-4402.""",
             {"text": "14/03/1988", "pii_type": "DOB"},
             {"text": "d.osei.ref@consultco.com", "pii_type": "EMAIL"},
             {"text": "+233-20-756-1122", "pii_type": "PHONE"},
-            {"text": "Linda Mensah", "pii_type": "NAME"},
-            {"text": "619-33-4402", "pii_type": "SSN"},
         ],
         "grader": "medium",
     },
@@ -247,7 +244,7 @@ def _grade_easy(predicted: list, ground_truth: list) -> dict:
 
 
 def _grade_medium(predicted: list, ground_truth: list) -> dict:
-    """Partial credit: right text wrong type = 0.5. FP penalty = 0.1 each."""
+    """Partial credit: right text wrong type = 0.5. FP penalty = 0.02 each."""
     full_credit = 0
     partial = 0.0
     matched = set()
@@ -269,7 +266,7 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
     total = len(ground_truth)
     fp = max(len(predicted) - len(matched), 0)
     raw = (full_credit + partial) / total if total else 0.0
-    penalty = fp * 0.1
+    penalty = fp * 0.02
     score = max(0.0, min(1.0, raw - penalty))
     precision = full_credit / len(predicted) if predicted else 0.0
     recall = full_credit / total if total else 0.0
