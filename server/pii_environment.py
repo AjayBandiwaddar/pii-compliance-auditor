@@ -247,7 +247,7 @@ def _grade_easy(predicted: list, ground_truth: list) -> dict:
 
 
 def _grade_medium(predicted: list, ground_truth: list) -> dict:
-    """Partial credit: right text wrong type = 0.5. FP penalty = 0.04 each."""
+    """Partial credit: right text wrong type = 0.5. Final medium score is calibrated downward."""
     full_credit = 0
     partial = 0.0
     matched = set()
@@ -270,7 +270,8 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
     fp = max(len(predicted) - len(matched), 0)
     raw = (full_credit + partial) / total if total else 0.0
     penalty = fp * 0.04
-    score = max(0.0, min(1.0, raw - penalty))
+    calibrated = (raw - penalty) * 0.7
+    score = max(0.0, min(1.0, calibrated))
     precision = full_credit / len(predicted) if predicted else 0.0
     recall = full_credit / total if total else 0.0
     f1 = (2 * precision * recall / (precision + recall)
@@ -286,7 +287,8 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
         "partial_credit": round(partial, 4),
         "feedback": (
             f"Full matches: {full_credit}, Partial (wrong type): {partial}, "
-            f"FP penalty: -{round(penalty, 2)}. Final: {round(score, 4)}"
+            f"FP penalty: -{round(penalty, 2)}, medium calibration x0.7. "
+            f"Final: {round(score, 4)}"
         ),
     }
 
