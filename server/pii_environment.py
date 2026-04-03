@@ -2,16 +2,12 @@
 """
 PII Compliance Auditor — Environment Implementation.
 
-A real-world OpenEnv environment where an AI agent must identify and
-classify Personally Identifiable Information (PII) in documents.
-
 Three tasks of increasing difficulty:
-  Task 1 (Easy)   — Customer support email, 3 obvious PII items
-  Task 2 (Medium) — Employee onboarding form, 6 embedded PII items
-  Task 3 (Hard)   — Data breach report, 13 PII items across all 8 types
+  Task 1 (Easy)   — Support email, 5 items, recall grader    → ~0.80
+  Task 2 (Medium) — Onboarding form, 10 items, partial grader → ~0.60
+  Task 3 (Hard)   — Forensic audit, 15 items, strict F1       → ~0.30
 
-Graders are fully deterministic: given the same submission, always
-the same score.
+Graders are fully deterministic.
 """
 
 import json
@@ -37,30 +33,33 @@ TASKS = {
             "You are a PII compliance auditor. Analyze the customer support email below "
             "and identify ALL personally identifiable information (PII). "
             "Look for: NAME, EMAIL, PHONE. "
-            "Note: not every number or name-like word is PII — use judgment. "
+            "Note: not every person mentioned is a data subject — "
+            "only flag PII belonging to the customer contacting support. "
             "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys. "
             "Example: [{\"text\": \"John Smith\", \"pii_type\": \"NAME\"}]"
         ),
         "pii_types_in_scope": ["NAME", "EMAIL", "PHONE"],
-        "document": """Subject: Account Access Issue — Ticket #4159-2847
+        "document": """Subject: Billing Problem — Urgent
 
-Hi Support Team,
+Hi there,
 
-My name is Sarah Mitchell and I've been unable to log into my account
-since yesterday. The issue started after I updated my billing details on
-the 3rd. Please reach me at sarah.mitchell@outlook.com or call me on
-+1-415-992-3847 at any time — my alternate is also reachable but
-sarah.mitchell@outlook.com is preferred.
+My name is Rachel Donovan and I've been charged twice for my subscription
+this month. Please contact me at rachel.d@fastmail.com or on my mobile
++44-7911-123456 as soon as possible.
 
-Could you also check with your colleague James if ticket 4159 is linked?
+I also have a backup address if the first doesn't work:
+r.donovan.backup@gmail.com — please try both.
 
-Looking forward to your help.
-Best,
-Sarah""",
+My account was handled by your agent Tom Nguyen last time, if that helps.
+
+Thanks,
+Rachel""",
         "ground_truth": [
-            {"text": "Sarah Mitchell", "pii_type": "NAME"},
-            {"text": "sarah.mitchell@outlook.com", "pii_type": "EMAIL"},
-            {"text": "+1-415-992-3847", "pii_type": "PHONE"},
+            {"text": "Rachel Donovan", "pii_type": "NAME"},
+            {"text": "rachel.d@fastmail.com", "pii_type": "EMAIL"},
+            {"text": "+44-7911-123456", "pii_type": "PHONE"},
+            {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
+            {"text": "Tom Nguyen", "pii_type": "NAME"},
         ],
         "grader": "easy",
     },
@@ -73,194 +72,126 @@ Sarah""",
             "and identify ALL personally identifiable information (PII). "
             "Look for: NAME, ADDRESS, DOB, SSN, PHONE, EMAIL. "
             "Note: some PII is embedded in sentences rather than labeled fields. "
-            "Not all numbers are PII — department codes and employee IDs are not. "
-            "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys. "
-            "Example: [{\"text\": \"John Smith\", \"pii_type\": \"NAME\"}]"
+            "Department codes and employee IDs are NOT PII — do not flag them. "
+            "Submit your findings as a JSON list of objects with 'text' and 'pii_type' keys."
         ),
         "pii_types_in_scope": ["NAME", "ADDRESS", "DOB", "SSN", "PHONE", "EMAIL"],
         "document": """EMPLOYEE ONBOARDING FORM — CONFIDENTIAL
-Department Code: 472-80 | Employee ID: TXN-9901
+Department Code: DEPT-7721 | Employee Ref: EMP-43210
 
-Full Name: James Okafor
-The employee was born on the 4th of July, 1988, in Lagos, Nigeria.
-Current residential address: 47 Maple Drive, Austin, Texas 78701.
-For payroll, the SSN on file reads 472-80-1937.
-James can be reached at +1-737-204-9901.
-Work email has been provisioned: j.okafor@techcorp.io
+Primary Employee
+Full Name: Ananya Krishnan
+Date of birth: 12 September 1991
+Residential address: Koramangala 5th Block, Bangalore 560095
+Mobile: +91-98765-43210
+Work email provisioned: ananya.k@techventures.in
+Government ID (SSN equivalent on file): 384-62-1947
 
-IT notes: laptop shipped to the residential address above.
-The account was activated by HR rep Linda — see internal ID TXN-9901.
+Notes: Laptop to be shipped to the residential address on file.
+Onboarding buddy assigned: David Osei (senior engineer).
+David joined the company on 14/03/1988 — please coordinate schedules.
+His contact for onboarding queries: d.osei.ref@consultco.com
+David is reachable on his Ghana line at +233-20-756-1122 during IST hours.
 
-Emergency contact: Linda Okafor, reachable at l.okafor.hr@techcorp.io""",
+HR rep: Linda — see internal ref TXN-43210.""",
         "ground_truth": [
-            {"text": "James Okafor", "pii_type": "NAME"},
-            {"text": "4th of July, 1988", "pii_type": "DOB"},
-            {"text": "47 Maple Drive, Austin, Texas 78701", "pii_type": "ADDRESS"},
-            {"text": "472-80-1937", "pii_type": "SSN"},
-            {"text": "+1-737-204-9901", "pii_type": "PHONE"},
-            {"text": "j.okafor@techcorp.io", "pii_type": "EMAIL"},
-            {"text": "Linda Okafor", "pii_type": "NAME"},
-            {"text": "l.okafor.hr@techcorp.io", "pii_type": "EMAIL"},
+            {"text": "Ananya Krishnan", "pii_type": "NAME"},
+            {"text": "12 September 1991", "pii_type": "DOB"},
+            {"text": "Koramangala 5th Block, Bangalore 560095", "pii_type": "ADDRESS"},
+            {"text": "+91-98765-43210", "pii_type": "PHONE"},
+            {"text": "ananya.k@techventures.in", "pii_type": "EMAIL"},
+            {"text": "384-62-1947", "pii_type": "SSN"},
+            {"text": "David Osei", "pii_type": "NAME"},
+            {"text": "14/03/1988", "pii_type": "DOB"},
+            {"text": "d.osei.ref@consultco.com", "pii_type": "EMAIL"},
+            {"text": "+233-20-756-1122", "pii_type": "PHONE"},
         ],
         "grader": "medium",
     },
 
     "task_3_hard": {
-        "task_name": "Technical Artifact Forensic Audit",
+        "task_name": "Multi-Party Compliance Forensic Audit",
         "difficulty": "hard",
         "description": (
-            "You are a PII compliance auditor performing a forensic review of a leaked technical artifact "
-            "containing git diffs, SQL statements, API logs, and support chat transcripts. "
+            "You are a PII compliance auditor performing a forensic audit on a leaked "
+            "internal document containing form data, transaction logs, and support notes. "
             "Identify ALL personally identifiable information (PII). "
-            "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, SSN, ADDRESS, DOB, PASSWORD. "
+            "All 8 PII types may be present: NAME, EMAIL, PHONE, CREDIT_CARD, SSN, "
+            "ADDRESS, DOB, PASSWORD. "
             "CRITICAL WARNINGS: "
-            "(1) The document contains convincing red herrings — partial card numbers, usernames without domains, "
-            "version strings, order IDs, product codes, and bcrypt hashes. Do NOT flag these as PII. "
-            "(2) PII appears inside code strings, SQL values, JSON fields, and natural conversation — "
-            "there are NO labeled fields like 'email:' or 'phone:' to guide you. "
-            "(3) Some formats are non-standard: AMEX cards have 15 digits, "
-            "international phones have country codes, addresses may be non-Western. "
-            "Extract EXACT text as it appears. Both text AND pii_type must be correct for full credit. "
-            "Submit as a JSON list of objects with 'text' and 'pii_type' keys."
+            "(1) The document contains red herrings — partial card numbers, IP addresses, "
+            "version strings, reference codes, and SSN fragments. Do NOT flag these. "
+            "(2) Two different individuals appear in the document — audit both. "
+            "(3) Some formats are non-standard: credit cards use spaces, Japanese phone "
+            "numbers have no country code, addresses may be non-Western. "
+            "(4) Passwords appear inside technical notes without obvious labels. "
+            "Extract EXACT text as it appears. Both text AND pii_type must be correct."
         ),
         "pii_types_in_scope": [
             "NAME", "EMAIL", "PHONE", "CREDIT_CARD", "SSN",
             "ADDRESS", "DOB", "PASSWORD"
         ],
-        "document": """FORENSIC EXPORT — INTERNAL USE ONLY
-Ticket: SEC-2024-1847 | Analyst: redacted | Date: 2024-10-02
+        "document": """INTERNAL AUDIT EXPORT — RESTRICTED
+Reference: AUD-2024-3391 | Date: 2024-11-05 | Analyst: compliance-bot
 
-=== SECTION A: GIT DIFF (accidental credential commit) ===
+=== RECORD 1: CUSTOMER ACCOUNT (EU) ===
 
-diff --git a/config/prod.yaml b/config/prod.yaml
---- a/config/prod.yaml
-+++ b/config/prod.yaml
-@@ -12,7 +12,7 @@
- payment:
-   processor: stripe
--  api_key: "sk_live_placeholder"
-+  primary_card: "3782 822463 10005"
-+  # fallback — Discover: 6011 1111 1111 1117
-+  card_holder: "Kenji Watanabe"
-+  notify: k.watanabe@devmail.jp
+Account holder: Isabel Ferreira
+Registered email: i.ferreira@netcorp.pt
+Date of birth on file: 1987-06-14
+Primary card: 4532 0151 1283 0366
+Billing address: Rua das Flores 22, 1200-195 Lisboa, Portugal
+Support line: +351-91-234-5678
+Govt ID cross-ref: 221-54-8832
+Last known credential (plaintext capture from legacy system):
+  stored_pwd = "Tr0ub4dor&3!"
 
- auth:
--  admin_pass: "changeme"
-+  admin_pass: "W@tana8e#Secure!"
-+  # DO NOT COMMIT — remove before PR
-+  # bcrypt ref: $2b$12$W@tana8eHash... (not the real password)
+Transaction log excerpt:
+  TXN-4532-0151 | EUR 142.00 | APPROVED | ref: 221-54 | ip: 192.168.10.5
+  Card BIN: 4532 | Scheme: VISA | Version: 1987-06
 
-diff --git a/tests/fixtures/user_seed.sql b/tests/fixtures/user_seed.sql
---- a/tests/fixtures/user_seed.sql
-+++ b/tests/fixtures/user_seed.sql
-@@ -0,0 +1,6 @@
-+-- Seed data accidentally included real records (revert immediately)
-+INSERT INTO users (name, dob, ssn, address) VALUES (
-+  'Kenji Watanabe',
-+  '1995-02-23',
-+  '523-45-7890',
-+  '2-14-5 Shibuya, Tokyo 150-0002, Japan'
-+);
-+-- Product code for reference: 523-45 (unrelated to above)
-+-- Order ID: 6011-1117 (do not confuse with payment methods)
+=== RECORD 2: PARTNER ACCOUNT (APAC) ===
 
-=== SECTION B: API RESPONSE LOG (production traffic sample) ===
+The second account is registered to one Hiroshi Tanaka, a corporate
+partner based in Tokyo. His registered contact is
+h.tanaka.work@jp-systems.co.jp and billing is routed to card
+4916 1234 5678 9012 (exp 03/27).
 
-2024-10-01 18:42:03 POST /api/v2/checkout 200
-Request-ID: 3782-8224-ABCD
-Payload (truncated):
-{
-  "customer": {
-    "full_name": "Fatima Al-Rashidi",
-    "contact": "fatima.ar.1988@outlook.com",
-    "mobile": "971-4-123-9876",
-    "billing_address": "PO Box 4422, Dubai Marina, Dubai, UAE",
-    "card": "6011 1111 1111 1117",
-    "dob": "1988-11-03"
-  },
-  "session": "a8f3c9d",
-  "version": "1988-11",
-  "ip": "192.168.0.14"
-}
+Registered address: 3-7-1 Shinjuku, Tokyo 160-0022
+Date of birth as per KYC submission: 1979-11-30
+Local contact number: 090-4432-8871
+System credential recovered from config backup:
+  # tanaka admin token: K@ts0_2024#jp
 
-=== SECTION C: SUPPORT CHAT TRANSCRIPT ===
-
-[10:14] Agent_07: Hi, can I get your name please?
-[10:14] Customer: yeah its fatima, Fatima Al-Rashidi
-[10:15] Agent_07: Thanks Fatima. Phone number on the account?
-[10:15] Customer: its nine-seven-one, four, one-two-three, nine-eight-seven-six
-[10:16] Agent_07: Got it. And the reset token for your account was sent — did you set
-         the new password to what you told our bot earlier?
-[10:16] Customer: yes its #fa_r@sh!d1_2024 i set it this morning
-[10:17] Agent_07: Perfect. Your card ending 1117 has been flagged. Full number
-         on file is 6011 1111 1111 1117. Shipping to PO Box 4422, Dubai Marina, Dubai, UAE?
-[10:17] Customer: yes thats right. also can you update my phone to +81-90-3344-5567
-[10:18] Agent_07: Done. Anything else?""",
+Support notes:
+  - Opened ticket ref 4916-1234 re: billing dispute (not a card number)
+  - DOB field showed 1979-11 initially (data entry error, now corrected)
+  - IP at time of access: 10.0.4.88""",
         "ground_truth": [
-            {"text": "3782 822463 10005", "pii_type": "CREDIT_CARD"},
-            {"text": "6011 1111 1111 1117", "pii_type": "CREDIT_CARD"},
-            {"text": "Kenji Watanabe", "pii_type": "NAME"},
-            {"text": "k.watanabe@devmail.jp", "pii_type": "EMAIL"},
-            {"text": "W@tana8e#Secure!", "pii_type": "PASSWORD"},
-            {"text": "1995-02-23", "pii_type": "DOB"},
-            {"text": "523-45-7890", "pii_type": "SSN"},
-            {"text": "2-14-5 Shibuya, Tokyo 150-0002, Japan", "pii_type": "ADDRESS"},
-            {"text": "Fatima Al-Rashidi", "pii_type": "NAME"},
-            {"text": "fatima.ar.1988@outlook.com", "pii_type": "EMAIL"},
-            {"text": "971-4-123-9876", "pii_type": "PHONE"},
-            {"text": "PO Box 4422, Dubai Marina, Dubai, UAE", "pii_type": "ADDRESS"},
-            {"text": "1988-11-03", "pii_type": "DOB"},
-            {"text": "#fa_r@sh!d1_2024", "pii_type": "PASSWORD"},
-            {"text": "+81-90-3344-5567", "pii_type": "PHONE"},
+            {"text": "Isabel Ferreira", "pii_type": "NAME"},
+            {"text": "i.ferreira@netcorp.pt", "pii_type": "EMAIL"},
+            {"text": "1987-06-14", "pii_type": "DOB"},
+            {"text": "4532 0151 1283 0366", "pii_type": "CREDIT_CARD"},
+            {"text": "Rua das Flores 22, 1200-195 Lisboa, Portugal", "pii_type": "ADDRESS"},
+            {"text": "+351-91-234-5678", "pii_type": "PHONE"},
+            {"text": "221-54-8832", "pii_type": "SSN"},
+            {"text": "Tr0ub4dor&3!", "pii_type": "PASSWORD"},
+            {"text": "Hiroshi Tanaka", "pii_type": "NAME"},
+            {"text": "h.tanaka.work@jp-systems.co.jp", "pii_type": "EMAIL"},
+            {"text": "4916 1234 5678 9012", "pii_type": "CREDIT_CARD"},
+            {"text": "3-7-1 Shinjuku, Tokyo 160-0022", "pii_type": "ADDRESS"},
+            {"text": "1979-11-30", "pii_type": "DOB"},
+            {"text": "090-4432-8871", "pii_type": "PHONE"},
+            {"text": "K@ts0_2024#jp", "pii_type": "PASSWORD"},
         ],
         "grader": "hard",
     },
 }
+
 # ── Grading Logic ──────────────────────────────────────────────────────────
-
-# Common LLM aliases for PII types — maps to our canonical names
-PII_TYPE_ALIASES = {
-    "DATE_OF_BIRTH": "DOB",
-    "BIRTH_DATE": "DOB",
-    "BIRTHDATE": "DOB",
-    "DATE": "DOB",
-    "CARD_NUMBER": "CREDIT_CARD",
-    "CREDIT_CARD_NUMBER": "CREDIT_CARD",
-    "CARD": "CREDIT_CARD",
-    "DEBIT_CARD": "CREDIT_CARD",
-    "PAYMENT_CARD": "CREDIT_CARD",
-    "SOCIAL_SECURITY_NUMBER": "SSN",
-    "SOCIAL_SECURITY": "SSN",
-    "PHONE_NUMBER": "PHONE",
-    "TELEPHONE": "PHONE",
-    "MOBILE": "PHONE",
-    "MOBILE_NUMBER": "PHONE",
-    "FULL_NAME": "NAME",
-    "PERSON_NAME": "NAME",
-    "STREET_ADDRESS": "ADDRESS",
-    "HOME_ADDRESS": "ADDRESS",
-    "PASS": "PASSWORD",
-    "CREDENTIAL": "PASSWORD",
-    "EMAIL_ADDRESS": "EMAIL",
-}
-
-def _normalize_pii_type(pii_type: str) -> str:
-    """Normalize LLM pii_type to our canonical names."""
-    canonical = pii_type.upper().strip()
-    return PII_TYPE_ALIASES.get(canonical, canonical)
 
 def _normalize(text: str) -> str:
     return text.lower().strip()
-
-
-def _normalize_numeric(text: str) -> str:
-    """For numeric PII (CC, SSN, PHONE), strip separators before comparing.
-    This ensures format variations (spaces/dots/dashes) don't cause false mismatches."""
-    import re
-    return re.sub(r"[\s\-\.]", "", text.lower().strip())
-
-
-NUMERIC_PII_TYPES = {"CREDIT_CARD", "SSN", "PHONE"}
 
 
 def _grade_easy(predicted: list, ground_truth: list) -> dict:
@@ -271,7 +202,7 @@ def _grade_easy(predicted: list, ground_truth: list) -> dict:
         for i, gt in enumerate(ground_truth):
             if i not in matched:
                 if (_normalize(pred.get("text", "")) == _normalize(gt["text"])
-                        and _normalize_pii_type(pred.get("pii_type", "")) == gt["pii_type"]):
+                        and pred.get("pii_type", "").upper() == gt["pii_type"]):
                     correct += 1
                     matched.add(i)
                     break
@@ -334,32 +265,23 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
         "partial_credit": round(partial, 4),
         "feedback": (
             f"Full matches: {full_credit}, Partial (wrong type): {partial}, "
-            f"FP penalty: -{round(penalty, 2)}. Final score: {round(score, 4)}"
+            f"FP penalty: -{round(penalty, 2)}. Final: {round(score, 4)}"
         ),
     }
 
 
 def _grade_hard(predicted: list, ground_truth: list) -> dict:
-    """Strict F1. Both text AND type must match exactly. FP penalty = 0.15.
-    For numeric PII types (CREDIT_CARD, SSN, PHONE), separators are normalized
-    so format variations (spaces/dots/dashes) do not penalize correct detections."""
+    """Strict F1. Exact text AND type required. FP penalty = 0.08 each."""
     correct = 0
     matched = set()
     for pred in predicted:
-        pred_type = _normalize_pii_type(pred.get("pii_type", ""))
-        pred_text = pred.get("text", "")
         for i, gt in enumerate(ground_truth):
             if i not in matched:
-                gt_type = gt["pii_type"]
-                if pred_type == gt_type:
-                    if gt_type in NUMERIC_PII_TYPES:
-                        text_match = _normalize_numeric(pred_text) == _normalize_numeric(gt["text"])
-                    else:
-                        text_match = _normalize(pred_text) == _normalize(gt["text"])
-                    if text_match:
-                        correct += 1
-                        matched.add(i)
-                        break
+                if (_normalize(pred.get("text", "")) == _normalize(gt["text"])
+                        and pred.get("pii_type", "").upper() == gt["pii_type"]):
+                    correct += 1
+                    matched.add(i)
+                    break
     total = len(ground_truth)
     fp = max(len(predicted) - correct, 0)
     precision = correct / len(predicted) if predicted else 0.0
@@ -379,7 +301,7 @@ def _grade_hard(predicted: list, ground_truth: list) -> dict:
         "partial_credit": 0.0,
         "feedback": (
             f"Strict F1: {round(f1, 4)}, FP penalty: -{round(penalty, 2)}. "
-            f"Final score: {round(score, 4)}"
+            f"Final: {round(score, 4)}"
         ),
     }
 
@@ -396,14 +318,11 @@ class PIIEnvironment(MCPEnvironment):
     """
     PII Compliance Auditor — OpenEnv Environment.
 
-    The agent is presented with documents containing PII and must identify
-    and classify each PII item correctly. Three tasks of increasing difficulty.
-
-    Tools exposed via MCP:
-        list_tasks()              → lists all available tasks
-        get_task(task_id)         → returns task document + instructions
-        submit_findings(task_id, findings_json) → grades and returns score
-        get_current_state()       → returns episode metadata
+    Tools:
+        list_tasks()                          → all available tasks
+        get_task(task_id)                     → document + instructions
+        submit_findings(task_id, findings_json) → grade and score
+        get_current_state()                   → episode metadata
     """
 
     def __init__(self):
@@ -411,13 +330,8 @@ class PIIEnvironment(MCPEnvironment):
 
         @mcp.tool
         def list_tasks() -> str:
-            """
-            List all available PII auditing tasks.
-
-            Returns:
-                JSON string with task ids, names, and difficulty levels.
-            """
-            tasks_summary = [
+            """List all available PII auditing tasks."""
+            return json.dumps([
                 {
                     "task_id": tid,
                     "task_name": t["task_name"],
@@ -425,25 +339,18 @@ class PIIEnvironment(MCPEnvironment):
                     "pii_types_in_scope": t["pii_types_in_scope"],
                 }
                 for tid, t in TASKS.items()
-            ]
-            return json.dumps(tasks_summary, indent=2)
+            ], indent=2)
 
         @mcp.tool
         def get_task(task_id: str) -> str:
             """
-            Get the document and instructions for a specific task.
+            Get document and instructions for a task.
 
             Args:
                 task_id: One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
-
-            Returns:
-                JSON string with task details and document to analyze.
             """
             if task_id not in TASKS:
-                return json.dumps({
-                    "error": f"Unknown task_id '{task_id}'. "
-                             f"Valid options: {list(TASKS.keys())}"
-                })
+                return json.dumps({"error": f"Unknown task_id '{task_id}'."})
             task = TASKS[task_id]
             self._current_task_id = task_id
             self._state.step_count += 1
@@ -463,38 +370,22 @@ class PIIEnvironment(MCPEnvironment):
 
             Args:
                 task_id: One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
-                findings_json: JSON string — list of {text, pii_type} objects.
-                    Example: '[{"text": "John Smith", "pii_type": "NAME"}]'
-
-            Returns:
-                JSON string with score (0.0-1.0), precision, recall, f1,
-                false_positives, partial_credit, and feedback.
+                findings_json: JSON array of {text, pii_type} objects.
             """
             if task_id not in TASKS:
-                return json.dumps({
-                    "error": f"Unknown task_id '{task_id}'.",
-                    "score": 0.0,
-                })
+                return json.dumps({"error": f"Unknown task_id.", "score": 0.0})
             try:
                 predicted = json.loads(findings_json)
                 if not isinstance(predicted, list):
-                    raise ValueError("findings_json must be a JSON array.")
+                    raise ValueError("Must be a JSON array.")
             except (json.JSONDecodeError, ValueError) as e:
-                return json.dumps({
-                    "error": f"Invalid findings_json: {e}",
-                    "score": 0.0,
-                })
+                return json.dumps({"error": str(e), "score": 0.0})
 
             task = TASKS[task_id]
-            grader_fn = GRADERS[task["grader"]]
-            result = grader_fn(predicted, task["ground_truth"])
-
-            # Track cumulative reward
+            result = GRADERS[task["grader"]](predicted, task["ground_truth"])
             self._cumulative_reward += result["score"]
             self._state.step_count += 1
             self._submissions[task_id] = result["score"]
-
-            # Mark done if all 3 tasks submitted
             done = len(self._submissions) >= len(TASKS)
             self._done = done
 
@@ -510,13 +401,7 @@ class PIIEnvironment(MCPEnvironment):
 
         @mcp.tool
         def get_current_state() -> str:
-            """
-            Get the current state of the episode.
-
-            Returns:
-                JSON string with episode_id, step_count, submissions so far,
-                cumulative_reward, and done flag.
-            """
+            """Get current episode state."""
             return json.dumps({
                 "episode_id": self._state.episode_id,
                 "step_count": self._state.step_count,
@@ -533,22 +418,12 @@ class PIIEnvironment(MCPEnvironment):
         self._done = False
         self._current_task_id: Optional[str] = None
 
-    def reset(
-        self,
-        seed: Optional[int] = None,
-        episode_id: Optional[str] = None,
-        **kwargs: Any,
-    ) -> Observation:
-        """Reset the environment for a new episode."""
-        self._state = State(
-            episode_id=episode_id or str(uuid4()),
-            step_count=0,
-        )
+    def reset(self, seed=None, episode_id=None, **kwargs) -> Observation:
+        self._state = State(episode_id=episode_id or str(uuid4()), step_count=0)
         self._cumulative_reward = 0.0
         self._submissions = {}
         self._done = False
         self._current_task_id = None
-
         return Observation(
             done=False,
             reward=0.0,
@@ -556,54 +431,26 @@ class PIIEnvironment(MCPEnvironment):
                 "status": "ready",
                 "message": (
                     "PII Compliance Auditor ready. "
-                    "Use list_tasks() to see available tasks, "
-                    "get_task(task_id) to retrieve a document, "
-                    "and submit_findings(task_id, findings_json) to get your score."
+                    "Use list_tasks() → get_task(task_id) → submit_findings()."
                 ),
                 "tasks_available": list(TASKS.keys()),
             },
         )
 
-    def _step_impl(
-        self,
-        action: Action,
-        timeout_s: Optional[float] = None,
-        **kwargs: Any,
-    ) -> Observation:
-        """Handle non-MCP actions gracefully."""
+    def _step_impl(self, action, timeout_s=None, **kwargs) -> Observation:
         return Observation(
-            done=False,
-            reward=0.0,
-            metadata={
-                "error": (
-                    f"Unknown action type: {type(action).__name__}. "
-                    "Use MCP tools: list_tasks(), get_task(), "
-                    "submit_findings(), get_current_state()."
-                )
-            },
+            done=False, reward=0.0,
+            metadata={"error": f"Unknown action: {type(action).__name__}. Use MCP tools."},
         )
 
-    def step(
-        self,
-        action: Action,
-        timeout_s: Optional[float] = None,
-        **kwargs: Any,
-    ) -> Observation:
-        """Execute a step — delegates MCP actions to base class."""
+    def step(self, action, timeout_s=None, **kwargs) -> Observation:
         self._state.step_count += 1
         return super().step(action, timeout_s=timeout_s, **kwargs)
 
-    async def step_async(
-        self,
-        action: Action,
-        timeout_s: Optional[float] = None,
-        **kwargs: Any,
-    ) -> Observation:
-        """Async step for WebSocket handler."""
+    async def step_async(self, action, timeout_s=None, **kwargs) -> Observation:
         self._state.step_count += 1
         return await super().step_async(action, timeout_s=timeout_s, **kwargs)
 
     @property
     def state(self) -> State:
-        """Return current episode state."""
         return self._state
