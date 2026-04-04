@@ -6,23 +6,39 @@ Three tasks of increasing difficulty.  Each episode is a genuine multi-step
 trajectory: the agent retrieves and annotates the document section-by-section,
 receiving an intermediate reward after each section, then finalises.
 
-  Task 1 (Easy)   — 2 sections, recall grader      ->  ~0.80 final
-  Task 2 (Medium) — 2 sections, partial grader     ->  ~0.58 final
-  Task 3 (Hard)   — 4 sections, strict F1 grader   ->  ~0.25-0.35 final
+  Task 1 (Easy)   — 2 sections, recall grader      ->  ~1.00 final
+  Task 2 (Medium) — 2 sections, partial grader     ->  ~0.90 final
+  Task 3 (Hard)   — 4 sections, strict F1 grader   ->  ~0.30 final
 
 Episode trajectory
 ------------------
   Step 1        : get_task(task_id)
   Step 2        : get_section(task_id, section_a)
-  Step 3        : annotate_section(...)   -> reward = section_a_score
+  Step 3        : annotate_section(...)   -> intermediate reward (section recall)
   ...repeat for every section...
-  Final step    : finalize_task(task_id) -> reward = final_score, done=true
+  Final step    : finalize_task(task_id) -> final task score, done=true
 
-  Task 1 / 2 :  8 steps  (1 + 2x2 + 1)
-  Task 3     : 14 steps  (1 + 2x4 + 1 + 2 for llm calls in inference)
+  Task 1 / 2 :  8 steps  (1 + 2x2 sections x 2 actions + 1 finalize)
+  Task 3     : 14 steps  (1 + 2x4 sections x 2 actions + 1 finalize)
 
 Intermediate reward : simple recall over that section's ground truth
 Final reward        : full task grader (with FP penalty) over all annotations
+
+Hard task calibration
+---------------------
+  Sections A and C contain 8 real PII items each, no red herrings.
+  Sections B and D contain 1 real PII item (PASSWORD) each, plus 4
+  PII-lookalike red herrings per section (emergency contacts, former
+  addresses, voided cards, delegates, shared switchboards).
+  All technical noise (IPs, ref codes, version strings) is removed from
+  B and D so that FP count is predictable at exactly 8.
+
+  Expected run (18 correct, 8 FPs, 26 predicted):
+    precision = 18/26 = 0.692
+    recall    = 18/18 = 1.000
+    F1        = 0.818
+    penalty   = 8 x 0.065 = 0.520
+    score     = 0.818 - 0.520 = 0.298  ~  0.30
 
 Backward compatibility
 -----------------------
@@ -75,16 +91,13 @@ TASKS = {
                     "as possible."
                 ),
                 "ground_truth": [
-                    {"text": "Rachel Donovan",       "pii_type": "NAME"},
-                    {"text": "rachel.d@fastmail.com", "pii_type": "EMAIL"},
-                    {"text": "+44-7911-123456",       "pii_type": "PHONE"},
+                    {"text": "Rachel Donovan",        "pii_type": "NAME"},
+                    {"text": "rachel.d@fastmail.com",  "pii_type": "EMAIL"},
+                    {"text": "+44-7911-123456",        "pii_type": "PHONE"},
                 ],
             },
             "section_b": {
                 "title": "Email Closing",
-                # Tom Nguyen IS in ground truth but the description says
-                # "customer only" -> instruction-following LLMs skip him
-                # -> section_b recall = 0.5, final task recall = 0.80
                 "text": (
                     "I also have a backup address if the first doesn't work:\n"
                     "r.donovan.backup@gmail.com - please try both.\n\n"
@@ -93,16 +106,16 @@ TASKS = {
                 ),
                 "ground_truth": [
                     {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
-                    {"text": "Tom Nguyen",                 "pii_type": "NAME"},
+                    {"text": "Tom Nguyen",                  "pii_type": "NAME"},
                 ],
             },
         },
         "ground_truth": [
-            {"text": "Rachel Donovan",            "pii_type": "NAME"},
-            {"text": "rachel.d@fastmail.com",      "pii_type": "EMAIL"},
-            {"text": "+44-7911-123456",            "pii_type": "PHONE"},
-            {"text": "r.donovan.backup@gmail.com", "pii_type": "EMAIL"},
-            {"text": "Tom Nguyen",                 "pii_type": "NAME"},
+            {"text": "Rachel Donovan",             "pii_type": "NAME"},
+            {"text": "rachel.d@fastmail.com",       "pii_type": "EMAIL"},
+            {"text": "+44-7911-123456",             "pii_type": "PHONE"},
+            {"text": "r.donovan.backup@gmail.com",  "pii_type": "EMAIL"},
+            {"text": "Tom Nguyen",                  "pii_type": "NAME"},
         ],
     },
 
@@ -154,10 +167,10 @@ TASKS = {
                     "HR rep: Linda - see internal ref TXN-43210."
                 ),
                 "ground_truth": [
-                    {"text": "David Osei",               "pii_type": "NAME"},
-                    {"text": "14/03/1988",               "pii_type": "DOB"},
-                    {"text": "d.osei.ref@consultco.com", "pii_type": "EMAIL"},
-                    {"text": "+233-20-756-1122",          "pii_type": "PHONE"},
+                    {"text": "David Osei",                "pii_type": "NAME"},
+                    {"text": "14/03/1988",                "pii_type": "DOB"},
+                    {"text": "d.osei.ref@consultco.com",  "pii_type": "EMAIL"},
+                    {"text": "+233-20-756-1122",           "pii_type": "PHONE"},
                 ],
             },
         },
@@ -191,7 +204,7 @@ TASKS = {
             "(2) SSNs may use dots instead of dashes (e.g. 531.20.7732). "
             "(3) Credit card numbers may contain spaces - extract with spaces as shown. "
             "(4) Dates must be extracted exactly as written. "
-            "(5) The dossier spans active records, supplemental history, and system "
+            "(5) The dossier spans active records, supplemental history, and credential "
             "logs - audit all content in the section thoroughly. "
             "(6) Two primary account holders appear across the full dossier. "
             "Submit as a JSON list of objects with 'text' and 'pii_type' keys."
@@ -201,11 +214,22 @@ TASKS = {
             "SSN", "ADDRESS", "DOB", "PASSWORD",
         ],
         "grader": "hard",
-        # Sections A and C: active records — 8 real PII each, no red herrings
-        # Sections B and D: supplemental — 1 real PII (PASSWORD) each +
-        #   4 PII-lookalike red herrings per section = 8 total FPs
-        #   FP penalty: 8 x 0.065 = 0.52 -> brings strong model from ~0.85 F1
-        #   down to ~0.33 final score
+        # ── Section design ───────────────────────────────────────────────
+        # A + C: active records — 8 real PII items each, no red herrings.
+        #        Model gets intermediate section recall = 1.0 for both.
+        #
+        # B + D: supplemental — 1 real PII (PASSWORD) + 4 red herrings each.
+        #        All technical noise (IPs, ref codes, version strings) REMOVED
+        #        so FP count = exactly 8 (4 per section, predictable).
+        #        Model gets intermediate section recall = 1.0 (it finds the password),
+        #        but at finalize the 8 FPs trigger the penalty.
+        #
+        # Finalize math (18 correct, 8 FPs, 26 predicted):
+        #   precision = 18/26 = 0.692
+        #   recall    = 18/18 = 1.000
+        #   F1        = 0.818
+        #   penalty   = 8 x 0.065 = 0.520
+        #   score     = 0.818 - 0.520 = 0.298  ~  0.30
         "sections": {
             "section_a": {
                 "title": "Account A - Active Records",
@@ -232,13 +256,14 @@ TASKS = {
                 ],
             },
             "section_b": {
-                "title": "Account A - Supplemental and Credential Log",
-                # Real PII: V0lk0v#Secure_83! (PASSWORD)
-                # Red herrings (look like real PII but are NOT in ground truth):
-                #   Elena Volkova        -> NAME   (emergency contact, not account holder)
-                #   +7-495-123-4567      -> PHONE  (Elena's number)
-                #   ul. Leninskiy 32...  -> ADDRESS (archived former residence)
-                #   5425 2334 0000 0001  -> CREDIT_CARD (voided, superseded card)
+                "title": "Account A - Supplemental Records and Credential Log",
+                # Real PII  : V0lk0v#Secure_83! (PASSWORD)
+                # Red herrings (PII-lookalikes, NOT in ground truth):
+                #   Elena Volkova           -> NAME    (emergency contact, not account holder)
+                #   +7-495-123-4567         -> PHONE   (Elena's contact number)
+                #   ul. Leninskiy 32, ...   -> ADDRESS (archived former residence)
+                #   5425 2334 0000 0001     -> CREDIT_CARD (voided card, superseded)
+                # Technical noise REMOVED to prevent unpredictable extra FPs.
                 "text": (
                     "Supplemental record entries:\n"
                     "  Emergency contact - Elena Volkova, +7-495-123-4567\n"
@@ -246,11 +271,7 @@ TASKS = {
                     "ul. Leninskiy 32, kv. 4, Moscow 119146\n"
                     "  Card superseded (voided 2022): 5425 2334 0000 0001\n\n"
                     "Credential audit note - legacy plaintext capture:\n"
-                    "  CONFIG_KEY=\"V0lk0v#Secure_83!\"\n"
-                    "  # ref: COMP-7731 | card_bin: 5425 | ip_last: 10.22.4.7\n\n"
-                    "Transaction excerpt:\n"
-                    "  REF-5425-2334 | RUB 8,400 | CLEARED\n"
-                    "  Version: 1983-09 | Schema: v2.7"
+                    "  CONFIG_KEY=\"V0lk0v#Secure_83!\""
                 ),
                 "ground_truth": [
                     {"text": "V0lk0v#Secure_83!", "pii_type": "PASSWORD"},
@@ -282,13 +303,14 @@ TASKS = {
                 ],
             },
             "section_d": {
-                "title": "Account B - Supplemental and System Notes",
-                # Real PII: Sh!mizu_2024# (PASSWORD)
-                # Red herrings:
-                #   Kenji Shimizu           -> NAME   (authorized delegate, not account holder)
-                #   kenji.s@nantech.co.jp   -> EMAIL  (Kenji's email)
-                #   5-10-3 Shibuya...       -> ADDRESS (superseded former billing address)
-                #   +81-3-5412-0000         -> PHONE  (shared office switchboard, not personal)
+                "title": "Account B - Supplemental Records and System Notes",
+                # Real PII  : Sh!mizu_2024# (PASSWORD)
+                # Red herrings (PII-lookalikes, NOT in ground truth):
+                #   Kenji Shimizu              -> NAME   (authorized delegate, not account holder)
+                #   kenji.s@nantech.co.jp      -> EMAIL  (Kenji's email)
+                #   5-10-3 Shibuya, ...        -> ADDRESS (superseded former billing address)
+                #   +81-3-5412-0000            -> PHONE  (shared office switchboard, not personal)
+                # Technical noise REMOVED to prevent unpredictable extra FPs.
                 "text": (
                     "Supplemental record entries:\n"
                     "  Authorized delegate on account: Kenji Shimizu, "
@@ -297,16 +319,14 @@ TASKS = {
                     "5-10-3 Shibuya, Shibuya-ku, Tokyo 150-0002\n"
                     "  Shared office switchboard (not personal): +81-3-5412-0000\n\n"
                     "System notes - credential recovery log:\n"
-                    "  # shimizu portal token recovered from backup:\n"
-                    "  # token_value = \"Sh!mizu_2024#\"\n"
-                    "  # access_ip: 192.168.3.44 | ref: 412-75 | build: 3566-0020"
+                    "  token_value = \"Sh!mizu_2024#\""
                 ),
                 "ground_truth": [
                     {"text": "Sh!mizu_2024#", "pii_type": "PASSWORD"},
                 ],
             },
         },
-        # 18 ground truth items total (sections A+B+C+D)
+        # 18 ground truth items total
         "ground_truth": [
             {"text": "Dmitri Volkov",                            "pii_type": "NAME"},
             {"text": "d.volkov@securenet.ru",                   "pii_type": "EMAIL"},
@@ -339,7 +359,7 @@ def _normalize(text: str) -> str:
 
 
 def _grade_easy(predicted: list, ground_truth: list) -> dict:
-    """Recall-based. No FP penalty. Target final score ~0.80."""
+    """Recall-based. No FP penalty. Target final score ~1.00."""
     correct = 0
     matched: set = set()
     for pred in predicted:
@@ -370,7 +390,8 @@ def _grade_easy(predicted: list, ground_truth: list) -> dict:
 
 
 def _grade_medium(predicted: list, ground_truth: list) -> dict:
-    """Partial credit + FP penalty 0.08. Target final score ~0.58."""
+    """Partial credit (right text, wrong type = 0.5). FP penalty = 0.08 each.
+    Target final score ~0.90."""
     full_credit = 0
     partial     = 0.0
     matched: set = set()
@@ -415,7 +436,7 @@ def _grade_medium(predicted: list, ground_truth: list) -> dict:
 
 
 def _grade_hard(predicted: list, ground_truth: list) -> dict:
-    """Strict exact F1. FP penalty 0.065. Target final score ~0.25-0.35."""
+    """Strict exact F1. FP penalty 0.065 each. Target final score ~0.30."""
     correct = 0
     matched: set = set()
     for pred in predicted:
@@ -456,8 +477,8 @@ GRADERS = {"easy": _grade_easy, "medium": _grade_medium, "hard": _grade_hard}
 def _section_reward(predicted: list, ground_truth: list) -> float:
     """
     Simple per-section recall used as the intermediate RL reward signal.
-    Applied uniformly across all task difficulties so the agent gets a
-    clean 0-1 signal per section regardless of the final grader type.
+    No FP penalty — gives the agent an honest signal of 'how much of this
+    section did you find?' before the full grader applies penalties at finalize.
     """
     if not ground_truth:
         return 1.0
@@ -482,14 +503,14 @@ class PIIEnvironment(MCPEnvironment):
     """
     PII Compliance Auditor — OpenEnv Multi-Step Environment.
 
-    Multi-step tools (recommended):
+    Multi-step tools (recommended workflow):
         list_tasks()
         get_task(task_id)
         get_section(task_id, section_id)
         annotate_section(task_id, section_id, findings_json)
         finalize_task(task_id)
 
-    Legacy tool (backward compatibility):
+    Legacy tool (backward compatibility / automated validator):
         submit_findings(task_id, findings_json)
 
     State tool:
@@ -501,7 +522,7 @@ class PIIEnvironment(MCPEnvironment):
 
         @mcp.tool
         def list_tasks() -> str:
-            """List all available PII auditing tasks."""
+            """List all available PII auditing tasks with section metadata."""
             return json.dumps([
                 {
                     "task_id":            tid,
@@ -544,9 +565,9 @@ class PIIEnvironment(MCPEnvironment):
                 ],
                 "workflow": (
                     "For each section: call get_section(task_id, section_id), "
-                    "analyse the text, then call annotate_section(task_id, "
-                    "section_id, findings_json). When all sections are done, "
-                    "call finalize_task(task_id)."
+                    "analyse the text, then annotate_section(task_id, section_id, "
+                    "findings_json). When all sections are annotated, call "
+                    "finalize_task(task_id)."
                 ),
             }, indent=2)
 
@@ -581,8 +602,9 @@ class PIIEnvironment(MCPEnvironment):
         def annotate_section(task_id: str, section_id: str,
                              findings_json: str) -> str:
             """
-            Submit PII findings for one section. Returns an intermediate reward.
-            Calling multiple times for the same section replaces the previous annotation.
+            Submit PII findings for one document section.
+            Returns an intermediate reward (section recall) immediately.
+            Calling again for the same section replaces the previous annotation.
 
             Args:
                 task_id:       One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
@@ -590,10 +612,10 @@ class PIIEnvironment(MCPEnvironment):
                 findings_json: JSON array of {text, pii_type} objects
             """
             if task_id not in TASKS:
-                return json.dumps({"error": f"Unknown task_id.", "section_score": 0.0})
+                return json.dumps({"error": "Unknown task_id.", "section_score": 0.0})
             task = TASKS[task_id]
             if section_id not in task["sections"]:
-                return json.dumps({"error": f"Unknown section_id.", "section_score": 0.0})
+                return json.dumps({"error": "Unknown section_id.", "section_score": 0.0})
             try:
                 predicted = json.loads(findings_json)
                 if not isinstance(predicted, list):
@@ -604,7 +626,6 @@ class PIIEnvironment(MCPEnvironment):
             section_gt = task["sections"][section_id]["ground_truth"]
             sec_score  = _section_reward(predicted, section_gt)
 
-            # Persist (last call wins per section)
             if task_id not in self._section_annotations:
                 self._section_annotations[task_id] = {}
             if task_id not in self._section_rewards:
@@ -612,7 +633,7 @@ class PIIEnvironment(MCPEnvironment):
 
             prev = self._section_rewards[task_id].get(section_id)
             if prev is not None:
-                self._cumulative_reward -= prev  # remove stale reward
+                self._cumulative_reward -= prev
             self._cumulative_reward += sec_score
             self._section_annotations[task_id][section_id] = predicted
             self._section_rewards[task_id][section_id]     = sec_score
@@ -623,13 +644,13 @@ class PIIEnvironment(MCPEnvironment):
             sections_remaining = len(all_sids) - annotated_count
 
             return json.dumps({
-                "task_id":             task_id,
-                "section_id":          section_id,
-                "section_title":       task["sections"][section_id]["title"],
-                "section_score":       sec_score,
-                "sections_annotated":  annotated_count,
-                "sections_remaining":  sections_remaining,
-                "ready_to_finalize":   sections_remaining == 0,
+                "task_id":            task_id,
+                "section_id":         section_id,
+                "section_title":      task["sections"][section_id]["title"],
+                "section_score":      sec_score,
+                "sections_annotated": annotated_count,
+                "sections_remaining": sections_remaining,
+                "ready_to_finalize":  sections_remaining == 0,
                 "feedback": (
                     f"Section recall: {sec_score:.4f}. "
                     + ("All sections done - call finalize_task() now."
@@ -642,16 +663,15 @@ class PIIEnvironment(MCPEnvironment):
         def finalize_task(task_id: str) -> str:
             """
             Finalise the task. Aggregates all section annotations and applies
-            the full task grader to produce the final episode reward.
+            the full task grader (with FP penalties) to produce the final reward.
 
             Args:
                 task_id: One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
             """
             if task_id not in TASKS:
-                return json.dumps({"error": f"Unknown task_id.", "score": 0.0})
+                return json.dumps({"error": "Unknown task_id.", "score": 0.0})
             task = TASKS[task_id]
 
-            # Combine all annotations in section order
             all_predictions: list = []
             for sid in task["sections"]:
                 all_predictions.extend(
@@ -680,6 +700,7 @@ class PIIEnvironment(MCPEnvironment):
             """
             Legacy single-shot submission (backward compatibility).
             Grades all findings directly without section structure.
+            Retained for automated validator compatibility.
 
             Args:
                 task_id:       One of 'task_1_easy', 'task_2_medium', 'task_3_hard'
@@ -714,7 +735,7 @@ class PIIEnvironment(MCPEnvironment):
 
         @mcp.tool
         def get_current_state() -> str:
-            """Get current episode state including per-section annotation progress."""
+            """Get full episode state including per-section annotation progress."""
             section_progress = {}
             for tid, task in TASKS.items():
                 section_progress[tid] = {
